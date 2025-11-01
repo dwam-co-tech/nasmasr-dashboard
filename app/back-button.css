@@ -1,0 +1,40 @@
+/* Back Button Styles */
+.back-button {
+  background: linear-gradient(135deg, #1EA78E 0%, #1d7c6b 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+  margin-left: 1rem;
+}
+
+.back-button:hover {
+  background: linear-gradient(135deg, #1EA78E 0%, #1d7c6b 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+}
+
+.back-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
+/* Update title section to accommodate back button */
+.title-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.title-section .title-icon {
+  font-size: 2.5rem;
+  margin-right: 0.5rem;
+}
