@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import { fetchUsersSummary } from '@/services/users';
 
 interface User {
   id: string;
@@ -31,64 +32,8 @@ interface UserPackage {
   expiryDate: string; // YYYY-MM-DD
 }
 
-// Generate 100 mock users deterministically to avoid hydration mismatches
-const generateMockUsers = (): User[] => {
-  const names = [
-    'أحمد محمد علي', 'فاطمة أحمد', 'محمد حسن', 'سارة إبراهيم', 'علي أحمد',
-    'نور الدين', 'مريم محمود', 'يوسف عبدالله', 'هدى سالم', 'عمر خالد',
-    'ليلى حسام', 'كريم محمد', 'رانيا عادل', 'طارق سعيد', 'دينا أشرف',
-    'حسام الدين', 'نادية فؤاد', 'وائل صلاح', 'منى عبدالرحمن', 'أسامة نبيل'
-  ];
-  const roles = ['معلن', 'مستخدم', 'مشرف', 'مراجع'];
-  const statuses: ('active' | 'banned')[] = ['active', 'banned'];
-
-  const users: User[] = [];
-  const baseDate = new Date('2024-06-01');
-  const dayMs = 24 * 60 * 60 * 1000;
-
-  for (let i = 1; i <= 100; i++) {
-    const name = `${names[(i - 1) % names.length]} ${i}`;
-    const role = roles[(i - 1) % roles.length];
-    const status = i % 5 === 0 ? 'banned' : 'active';
-    const adsCount = (i * 7) % 50;
-    const phone = `+2010${String((i * 123456) % 100000000).padStart(8, '0')}`;
-
-    const registrationDate = new Date(baseDate.getTime() - (i % 180) * dayMs);
-    const lastLoginDate = new Date(baseDate.getTime() - (i % 30) * dayMs);
-
-    const hasPackage = i % 10 < 3;
-    const pkg: UserPackage | undefined = hasPackage
-      ? {
-          plan: (i % 2 === 0 ? 'متميز' : 'ستاندر') as UserPackage['plan'],
-          adsCount: (i % 20) + 5,
-          expiryDate: new Date(baseDate.getTime() + ((i % 60) + 15) * dayMs)
-            .toISOString()
-            .split('T')[0],
-        }
-      : undefined;
-
-    users.push({
-      id: String(i),
-      name,
-      phone,
-      userCode: `USR${String(i).padStart(3, '0')}`,
-      status,
-      registrationDate: registrationDate.toISOString().split('T')[0],
-      adsCount,
-      role,
-      lastLogin: lastLoginDate.toISOString().split('T')[0],
-      phoneVerified: i % 4 === 0,
-      package: pkg,
-    });
-  }
-
-  return users;
-};
-
-const mockUsers: User[] = generateMockUsers();
-
 export default function UsersPage() {
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
@@ -99,6 +44,32 @@ export default function UsersPage() {
   const usersPerPage = 10;
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<User | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const resp = await fetchUsersSummary();
+        const mapped = resp.users.map(u => ({
+          id: String(u.id),
+          name: u.name ?? '',
+          phone: u.phone,
+          userCode: u.user_code,
+          status: u.status === 'active' ? 'active' : 'banned',
+          registrationDate: u.registered_at,
+          adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
+          role: u.role,
+          lastLogin: u.registered_at,
+          phoneVerified: false,
+        } as User));
+        setUsers(mapped);
+      } catch (e) {
+        showToast('تعذر تحميل المستخدمين', 'error');
+      }
+    };
+    load();
+  }, []);
+
+  
 
   // Packages modal state
   const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
