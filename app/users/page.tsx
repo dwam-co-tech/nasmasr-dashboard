@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { fetchUsersSummary } from '@/services/users';
+import { fetchUsersSummary, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories } from '@/services/users';
 
 interface User {
   id: string;
@@ -32,6 +32,22 @@ interface UserPackage {
   expiryDate: string; // YYYY-MM-DD
 }
 
+interface AdItem {
+  id: string;
+  title: string;
+  status: string;
+  publishDate: string;
+  category: string;
+  image: string;
+}
+
+const toImageUrl = (src: string | null | undefined): string => {
+  if (!src || src === 'NULL') return '/file.svg';
+  if (src.startsWith('http://') || src.startsWith('https://')) return src;
+  const trimmed = src.startsWith('/') ? src.slice(1) : src;
+  return `https://api.nasmasr.app/${trimmed}`;
+};
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,6 +60,11 @@ export default function UsersPage() {
   const usersPerPage = 10;
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<User | null>(null);
+  const [ads, setAds] = useState<AdItem[]>([]);
+  const [categories, setCategories] = useState<string[]>(['all']);
+  type UserSubscriptionForm = { annualFee: number; paidAmount: number };
+  const SUB_LS_PREFIX = 'userSubscription:';
+  const [subscriptionForm, setSubscriptionForm] = useState<UserSubscriptionForm>({ annualFee: 0, paidAmount: 0 });
 
   useEffect(() => {
     const load = async () => {
@@ -69,7 +90,96 @@ export default function UsersPage() {
     load();
   }, []);
 
-  
+  useEffect(() => {
+    if (!selectedUser) return;
+    try {
+      const raw = localStorage.getItem(SUB_LS_PREFIX + selectedUser.id);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<UserSubscriptionForm>;
+        setSubscriptionForm({
+          annualFee: typeof parsed.annualFee === 'number' ? parsed.annualFee : Number(parsed.annualFee) || 0,
+          paidAmount: typeof parsed.paidAmount === 'number' ? parsed.paidAmount : Number(parsed.paidAmount) || 0,
+        });
+      } else {
+        setSubscriptionForm({ annualFee: 0, paidAmount: 0 });
+      }
+    } catch {
+      setSubscriptionForm({ annualFee: 0, paidAmount: 0 });
+    }
+  }, [selectedUser]);
+
+  const handleSubscriptionChange = (field: keyof UserSubscriptionForm, value: number) => {
+    setSubscriptionForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const saveSubscriptionForUser = () => {
+    if (!selectedUser) return;
+    try {
+      const payload = { ...subscriptionForm, updatedAt: new Date().toISOString() };
+      localStorage.setItem(SUB_LS_PREFIX + selectedUser.id, JSON.stringify(payload));
+      showToast('تم حفظ بيانات الاشتراك السنوي لهذا المستخدم', 'success');
+    } catch {
+      showToast('تعذر حفظ بيانات الاشتراك السنوي', 'error');
+    }
+  };
+
+  useEffect(() => {
+    const loadCats = async () => {
+      try {
+        const resp = await fetchCategories();
+        const slugs = Array.isArray(resp?.data) ? resp.data.map(c => c.slug).filter(Boolean) : [];
+        setCategories(['all', ...slugs]);
+      } catch (e) {
+        setCategories(['all']);
+      }
+    };
+    loadCats();
+  }, []);
+
+  const CATEGORY_LABELS_AR: Record<string, string> = {
+    real_estate: 'عقارات',
+    cars: 'سيارات',
+    cars_rent: 'تأجير سيارات',
+    'spare-parts': 'قطع غيار',
+    stores: 'محلات',
+    restaurants: 'مطاعم',
+    groceries: 'بقالة',
+    'food-products': 'منتجات غذائية',
+    electronics: 'إلكترونيات',
+    'home-tools': 'أدوات منزلية',
+    furniture: 'أثاث',
+    doctors: 'أطباء',
+    health: 'الصحة',
+    teachers: 'معلمون',
+    education: 'تعليم',
+    jobs: 'وظائف',
+    shipping: 'شحن',
+    'mens-clothes': 'ملابس رجالي',
+    'watches-jewelry': 'ساعات ومجوهرات',
+    'free-professions': 'مهن حرة',
+    'kids-toys': 'ألعاب أطفال',
+    gym: 'رياضة',
+    construction: 'مقاولات',
+    maintenance: 'صيانة',
+    'car-services': 'خدمات سيارات',
+    'home-services': 'خدمات منزلية',
+    'lighting-decor': 'إضاءة وديكور',
+    animals: 'حيوانات',
+    'farm-products': 'منتجات زراعية',
+    wholesale: 'جملة',
+    'production-lines': 'خطوط إنتاج',
+    'light-vehicles': 'مركبات خفيفة',
+    'heavy-transport': 'نقل ثقيل',
+    tools: 'أدوات',
+    'home-appliances': 'أجهزة منزلية',
+    missing: 'مفقودات',
+  };
+
+  const SECTION_AR_TO_SLUG: Record<string, string> = Object.keys(CATEGORY_LABELS_AR).reduce((acc, slug) => {
+    const label = CATEGORY_LABELS_AR[slug];
+    acc[label] = slug;
+    return acc;
+  }, {} as Record<string, string>);
 
   // Packages modal state
   const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
@@ -88,11 +198,15 @@ export default function UsersPage() {
   const [verificationCode, setVerificationCode] = useState<string>('');
 
   const generateVerificationCode = () => Math.floor(100000 + Math.random() * 900000).toString();
-  const openVerifyModal = (user: User) => {
-    const code = generateVerificationCode();
-    setVerificationCode(code);
+  const openVerifyModal = async (user: User) => {
     setUserForVerify(user);
-    setIsVerifyModalOpen(true);
+    try {
+      const resp = await createUserOtp(Number(user.id));
+      setVerificationCode(String(resp.otp));
+      setIsVerifyModalOpen(true);
+    } catch (e) {
+      showToast('تعذر إنشاء كود التحقق', 'error');
+    }
   };
   const closeVerifyModal = () => {
     setIsVerifyModalOpen(false);
@@ -108,16 +222,32 @@ export default function UsersPage() {
       showToast('تعذر النسخ تلقائيًا، يرجى النسخ يدويًا', 'warning');
     }
   };
-  const openWhatsAppWithCode = (user: User) => {
-    const code = generateVerificationCode();
-    setVerificationCode(code);
-    setUserForVerify(user);
+  const openWhatsAppWithCode = async (user: User) => {
+    try {
+      const resp = await createUserOtp(Number(user.id));
+      const code = String(resp.otp);
+      setVerificationCode(code);
+      setUserForVerify(user);
+      const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
+      const message = encodeURIComponent(`كود التحقق: ${code}`);
+      const waUrl = `https://wa.me/${phoneNormalized}?text=${message}`;
+      try {
+        window.open(waUrl, '_blank');
+        showToast(`تم فتح واتساب وإدراج الكود: ${code}`, 'success');
+      } catch (e) {
+        showToast('تعذر فتح واتساب، تحقق من الإعدادات', 'error');
+      }
+    } catch (e) {
+      showToast('تعذر إنشاء كود التحقق', 'error');
+    }
+  };
+
+  const openWhatsAppContact = (user: User) => {
     const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
-    const message = encodeURIComponent(`كود التحقق: ${code}`);
-    const waUrl = `https://wa.me/${phoneNormalized}?text=${message}`;
+    const waUrl = `https://wa.me/${phoneNormalized}`;
     try {
       window.open(waUrl, '_blank');
-      showToast(`تم فتح واتساب وإدراج الكود: ${code}`, 'success');
+      showToast('تم فتح واتساب', 'success');
     } catch (e) {
       showToast('تعذر فتح واتساب، تحقق من الإعدادات', 'error');
     }
@@ -140,81 +270,87 @@ export default function UsersPage() {
   const handleNewUserChange = (field: keyof typeof newUserForm, value: string | number) => {
     setNewUserForm(prev => ({ ...prev, [field]: value }));
   };
-  const saveNewUser = () => {
-    if (!newUserForm.name.trim() || !newUserForm.phone.trim()) {
-      showToast('يرجى إدخال الاسم ورقم الهاتف', 'warning');
+  const saveNewUser = async () => {
+    if (!newUserForm.phone.trim()) {
+      showToast('يرجى إدخال رقم الهاتف', 'warning');
       return;
     }
-    const newId = Date.now().toString();
-    const newUser: User = {
-      id: newId,
-      name: newUserForm.name.trim(),
-      phone: newUserForm.phone.trim(),
-      userCode: `USR${newId.slice(-3)}`,
-      status: newUserForm.status,
-      registrationDate: newUserForm.registrationDate,
-      adsCount: typeof newUserForm.adsCount === 'number' ? newUserForm.adsCount : Number(newUserForm.adsCount) || 0,
-      role: newUserForm.role,
-      lastLogin: newUserForm.lastLogin,
-      phoneVerified: false,
-    };
-    setUsers(prev => [newUser, ...prev]);
-    setCurrentPage(1);
-    setIsAddModalOpen(false);
-    setNewUserForm({
-      name: '',
-      phone: '',
-      role: 'مستخدم',
-      status: 'active',
-      adsCount: 0,
-      registrationDate: new Date().toISOString().split('T')[0],
-      lastLogin: new Date().toISOString().split('T')[0],
-    });
-    showToast('تم إضافة المستخدم بنجاح', 'success');
+    try {
+      const roleRaw = newUserForm.role?.trim();
+      const roleMapped = roleRaw === 'معلن' ? 'advertiser' : roleRaw === 'مستخدم' ? 'user' : roleRaw || undefined;
+      const payload = {
+        name: newUserForm.name?.trim() || undefined,
+        phone: newUserForm.phone.trim(),
+        role: roleMapped,
+        status: newUserForm.status === 'banned' ? 'blocked' : 'active',
+      };
+      const resp = await createUser(payload);
+      const u = resp.user;
+      const created: User = {
+        id: String(u.id),
+        name: u.name ?? '',
+        phone: u.phone,
+        userCode: u.user_code,
+        status: u.status === 'active' ? 'active' : 'banned',
+        registrationDate: u.registered_at,
+        adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
+        role: u.role,
+        lastLogin: u.registered_at,
+        phoneVerified: false,
+      };
+      setUsers(prev => [created, ...prev]);
+      setCurrentPage(1);
+      setIsAddModalOpen(false);
+      setNewUserForm({
+        name: '',
+        phone: '',
+        role: 'مستخدم',
+        status: 'active',
+        adsCount: 0,
+        registrationDate: new Date().toISOString().split('T')[0],
+        lastLogin: new Date().toISOString().split('T')[0],
+      });
+      showToast(resp?.message || 'تم إضافة المستخدم بنجاح', 'success');
+    } catch (e) {
+      showToast('تعذر إضافة المستخدم', 'error');
+    }
   };
 
-  // Mock ads data with categories and images
-  const mockAds = [
-    {
-      id: '1',
-      title: 'شقة للبيع في المعادي',
-      status: 'منشور',
-      publishDate: '2024-01-15',
-      category: 'عقارات',
-      image: '/flat.jpg'
-    },
-    {
-      id: '2',
-      title: 'سيارة BMW للبيع',
-      status: 'قيد المراجعة',
-      publishDate: '2024-01-18',
-      category: 'سيارات',
-      image: '/car.webp'
-    },
-    {
-      id: '3',
-      title: 'لابتوب Dell للبيع',
-      status: 'منشور',
-      publishDate: '2024-01-20',
-      category: 'إلكترونيات',
-      image: '/laptop.jpg'
-    },
-    {
-      id: '4',
-      title: 'سيارة تويوتا 2020',
-      status: 'منشور',
-      publishDate: '2024-01-22',
-      category: 'سيارات',
-      image: '/car2.webp'
-    }
-  ];
+  useEffect(() => {
+    const loadUserAds = async () => {
+      if (!selectedUser) {
+        setAds([]);
+        return;
+      }
+      try {
+        const params = selectedCategory !== 'all'
+          ? { per_page: 20, status: 'Valid', all: false, category_slugs: selectedCategory }
+          : { per_page: 20, status: 'Valid', all: false };
+        const resp = await fetchUserListings(Number(selectedUser.id), params);
+        const mapped = resp.listings.map(l => ({
+          id: String(l.id),
+          title: l.title,
+          status: l.status,
+          publishDate: l.published_at,
+          category: l.section,
+          image: toImageUrl(l.image),
+          categorySlug: SECTION_AR_TO_SLUG[l.section] ?? l.section,
+        }));
+        setAds(mapped);
+      } catch (e) {
+        setAds([]);
+      }
+    };
+    loadUserAds();
+  }, [selectedUser, selectedCategory]);
 
-  const categories = ['all', 'عقارات', 'سيارات', 'إلكترونيات'];
-
-  // Filter ads by category
-  const filteredAds = selectedCategory === 'all' 
-    ? mockAds 
-    : mockAds.filter(ad => ad.category === selectedCategory);
+  const filteredAds = selectedCategory === 'all'
+    ? ads
+    : ads.filter(
+        (ad) =>
+          (ad as any).categorySlug === selectedCategory ||
+          ad.category === (CATEGORY_LABELS_AR[selectedCategory] ?? selectedCategory)
+      );
   const filteredUsers = users.filter(user =>
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.phone.includes(searchTerm) ||
@@ -266,49 +402,34 @@ export default function UsersPage() {
     setEditForm(null);
   }, [selectedUser]);
 
-  const handleBanUser = (userId: string) => {
-    const user = users.find(u => u.id === userId);
-    const newStatus = user?.status === 'active' ? 'banned' : 'active';
-    
-    setUsers(users.map(user =>
-      user.id === userId
-        ? { ...user, status: newStatus }
-        : user
-    ));
-    
-    showToast(
-      newStatus === 'banned' 
-        ? `تم حظر المستخدم ${user?.name} بنجاح` 
-        : `تم إلغاء حظر المستخدم ${user?.name} بنجاح`,
-      'success'
-    );
+  const handleBanUser = async (userId: string) => {
+    const u = users.find(x => x.id === userId);
+    if (!u) return;
+    try {
+      const resp = await toggleUserBlock(Number(userId));
+      const msg = (resp.message || '').toLowerCase();
+      const newStatus: User['status'] = msg.includes('unblocked') ? 'active' : 'banned';
+      setUsers(prev => prev.map(x => (x.id === userId ? { ...x, status: newStatus } as User : x)));
+      showToast(newStatus === 'banned' ? `تم حظر المستخدم ${u.name} بنجاح` : `تم إلغاء حظر المستخدم ${u.name} بنجاح`, 'success');
+    } catch (e) {
+      showToast('تعذر تغيير حالة المستخدم', 'error');
+    }
   };
 
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) return;
-    showToast(
-      `هل أنت متأكد من حذف المستخدم ${user.name}؟`,
-      'warning',
-      {
-        actions: [
-          {
-            label: 'حذف',
-            variant: 'primary',
-            onClick: () => {
-              setUsers(prev => prev.filter(u => u.id !== userId));
-              if (selectedUser?.id === userId) {
-                setShowUserProfile(false);
-                setSelectedUser(null);
-              }
-              showToast('تم حذف المستخدم بنجاح', 'success');
-            },
-          },
-          { label: 'إلغاء', variant: 'secondary' },
-        ],
-        duration: 0,
+    try {
+      const resp = await deleteUser(Number(userId));
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      if (selectedUser?.id === userId) {
+        setShowUserProfile(false);
+        setSelectedUser(null);
       }
-    );
+      showToast(resp?.message || 'تم حذف المستخدم بنجاح', 'success');
+    } catch (e) {
+      showToast('تعذر حذف المستخدم', 'error');
+    }
   };
 
   const handleVerifyPhone = (userId: string) => {
@@ -365,7 +486,7 @@ export default function UsersPage() {
     const dayMs = 24 * 60 * 60 * 1000;
     const acceptance = new Date(user.registrationDate);
     // Use earliest publishDate from mockAds as a proxy for ad start
-    const earliestAdStr = mockAds
+    const earliestAdStr = ads
       .map(a => a.publishDate)
       .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
     const adStart = earliestAdStr ? new Date(earliestAdStr) : acceptance;
@@ -380,7 +501,7 @@ export default function UsersPage() {
     if (!user || !expiryDate) return 0;
     const dayMs = 24 * 60 * 60 * 1000;
     const acceptance = new Date(user.registrationDate);
-    const earliestAdStr = mockAds
+    const earliestAdStr = ads
       .map(a => a.publishDate)
       .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
     const adStart = earliestAdStr ? new Date(earliestAdStr) : acceptance;
@@ -411,14 +532,39 @@ export default function UsersPage() {
     setEditForm({ ...selectedUser });
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!selectedUser || !editForm) return;
-    const updated = { ...selectedUser, ...editForm } as User;
-    setUsers(prev => prev.map(u => (u.id === selectedUser.id ? updated : u)));
-    setSelectedUser(updated);
-    setIsEditing(false);
-    setEditForm(null);
-    showToast('تم حفظ التعديلات بنجاح', 'success');
+    try {
+      const roleRaw = editForm.role?.trim();
+      const roleMapped = roleRaw === 'معلن' ? 'advertiser' : roleRaw === 'مستخدم' ? 'user' : roleRaw || undefined;
+      const payload = {
+        name: editForm.name?.trim() || undefined,
+        phone: editForm.phone?.trim() || undefined,
+        role: roleMapped,
+        status: editForm.status === 'banned' ? 'blocked' : 'active',
+      };
+      const resp = await updateUser(Number(selectedUser.id), payload);
+      const u = resp.user;
+      const updated: User = {
+        id: String(u.id),
+        name: u.name ?? '',
+        phone: u.phone,
+        userCode: u.user_code,
+        status: u.status === 'active' ? 'active' : 'banned',
+        registrationDate: u.registered_at,
+        adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
+        role: u.role,
+        lastLogin: u.registered_at,
+        phoneVerified: selectedUser.phoneVerified,
+      };
+      setUsers(prev => prev.map(x => (x.id === selectedUser.id ? updated : x)));
+      setSelectedUser(updated);
+      setIsEditing(false);
+      setEditForm(null);
+      showToast('تم حفظ التعديلات بنجاح', 'success');
+    } catch (e) {
+      showToast('تعذر حفظ التعديلات', 'error');
+    }
   };
 
   const handleResetPassword = (userId: string) => {
@@ -460,39 +606,23 @@ export default function UsersPage() {
     }
   };
 
-  const handleSetPIN = (userId: string) => {
+  const handleSetPIN = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) {
       showToast('تعذر العثور على المستخدم', 'error');
       return;
     }
-
-    const newPassword = '123456789';
-
-    // تحديث بيانات المستخدم (في التطبيق الحقيقي سيكون عبر API)
-    setUsers(users.map(u =>
-      u.id === userId
-        ? { ...u, lastLogin: new Date().toISOString().split('T')[0] }
-        : u
-    ));
-
-    // إرسال كلمة السر للمستخدم عبر واتساب
-    const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
-    if (!phoneNormalized) {
-      showToast('رقم هاتف المستخدم غير صالح لإرسال واتساب', 'warning');
-      return;
-    }
-
-    const message = encodeURIComponent(
-      `مرحبًا ${user.name}، تم تغيير كلمة السر الخاصة بحسابك إلى: ${newPassword}.\nيرجى تسجيل الدخول وتغييرها بعد أول دخول.\nفريق ناس مصر`
-    );
-    const waUrl = `https://wa.me/${phoneNormalized}?text=${message}`;
-
     try {
-      window.open(waUrl, '_blank');
-      showToast(`تم تغيير كلمة السر وإرسالها عبر واتساب للمستخدم ${user.name}`, 'success');
+      const resp = await changeUserPassword(Number(userId));
+      const msg = resp.message;
+      try {
+        await navigator.clipboard.writeText(msg);
+        showToast('تم نسخ الرسالة بنجاح', 'success');
+      } catch (e) {
+        showToast('تعذر النسخ تلقائيًا، يرجى النسخ يدويًا', 'warning');
+      }
     } catch (e) {
-      showToast('تم تغيير كلمة السر، لكن تعذر فتح واتساب', 'warning');
+      showToast('تعذر تغيير كلمة السر', 'error');
     }
   };
 
@@ -797,9 +927,9 @@ export default function UsersPage() {
                       onChange={(e) => setSelectedCategory(e.target.value)}
                       className="category-select"
                     >
-                      <option value="all">جميع الأقسام</option>
-                      {categories.filter(cat => cat !== 'all').map(category => (
-                        <option key={category} value={category}>{category}</option>
+                      <option value="all">all</option>
+                      {categories.filter(cat => cat !== 'all').map((slug) => (
+                        <option key={slug} value={slug}>{slug}</option>
                       ))}
                     </select>
                   </div>
@@ -841,6 +971,34 @@ export default function UsersPage() {
             {activeTab === 'transactions' && (
               <div className="user-transactions-tab">
                 <h3>المعاملات المالية</h3>
+                <div className="subscription-form">
+                  <h4>اشتراك سنوي للمستخدم</h4>
+                  <div className="subscription-grid">
+                    <div className="form-group">
+                      <label>قيمة الاشتراك السنوي</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="form-input"
+                        value={subscriptionForm.annualFee}
+                        onChange={(e) => handleSubscriptionChange('annualFee', Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>المبلغ المدفوع</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="form-input"
+                        value={subscriptionForm.paidAmount}
+                        onChange={(e) => handleSubscriptionChange('paidAmount', Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                  <div className="subscription-actions">
+                    <button className="btn-save" onClick={saveSubscriptionForUser}>حفظ الاشتراك</button>
+                  </div>
+                </div>
                 <div className="transactions-list">
                   <div className="transaction-item">
                     <span>رسوم إعلان</span>
@@ -1199,8 +1357,8 @@ export default function UsersPage() {
                       <span>{user.phone}</span>
                       <button
                         className="whatsapp-icon"
-                        onClick={() => openWhatsAppWithCode(user)}
-                        title="فتح واتساب وإدراج الكود"
+                        onClick={() => openWhatsAppContact(user)}
+                        title="فتح واتساب"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>
@@ -1343,8 +1501,8 @@ export default function UsersPage() {
                       {user.phone}
                       <button
                         className="whatsapp-icon"
-                        onClick={() => openWhatsAppWithCode(user)}
-                        title="فتح واتساب وإدراج الكود"
+                        onClick={() => openWhatsAppContact(user)}
+                        title="فتح واتساب"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>

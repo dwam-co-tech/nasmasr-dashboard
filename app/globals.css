@@ -4425,6 +4425,33 @@ html, body, .dashboard-layout, .content, .reports-page {
   gap: 0.5rem;
 }
 
+.subscription-form {
+  padding: 1rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 1rem;
+}
+
+.subscription-form h4 {
+  margin: 0 0 1rem 0;
+  color: var(--color-black);
+  font-size: 1.1rem;
+}
+
+.subscription-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.subscription-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .transaction-item {
   display: grid;
   grid-template-columns: 1fr auto auto;

@@ -1,4 +1,4 @@
-import type { UsersSummaryResponse } from '@/models/users';
+import type { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse } from '@/models/users';
 
 export async function fetchUsersSummary(token?: string): Promise<UsersSummaryResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
@@ -10,6 +10,168 @@ export async function fetchUsersSummary(token?: string): Promise<UsersSummaryRes
   if (!res.ok || !data) {
     const err = raw as { error?: string; message?: string } | null;
     const message = (err?.error || err?.message || 'تعذر جلب قائمة المستخدمين');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function updateUser(userId: number | string, payload: UpdateUserPayload, token?: string): Promise<UpdateUserResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/users/${userId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as UpdateUserResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر تحديث بيانات المستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function toggleUserBlock(userId: number | string, token?: string): Promise<BlockUserResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/users/${userId}/block`, {
+    method: 'PATCH',
+    headers,
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as BlockUserResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر تغيير حالة الحظر للمستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function deleteUser(userId: number | string, token?: string): Promise<DeleteUserResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as DeleteUserResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر حذف المستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function createUser(payload: CreateUserPayload, token?: string): Promise<CreateUserResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch('https://api.nasmasr.app/api/admin/users', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as CreateUserResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر إضافة المستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function changeUserPassword(userId: number | string, token?: string): Promise<ChangePasswordResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/change-password/${userId}`, {
+    method: 'PUT',
+    headers,
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as ChangePasswordResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر تغيير كلمة السر للمستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function createUserOtp(userId: number | string, token?: string): Promise<CreateOtpResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/create-otp/${userId}`, {
+    method: 'POST',
+    headers,
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as CreateOtpResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر إنشاء كود التحقق');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function fetchUserListings(
+  userId: number | string,
+  params?: { per_page?: number; status?: string; all?: boolean; category_slugs?: string | string[] },
+  token?: string
+): Promise<SingleUserListingsResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const baseUrl = `https://api.nasmasr.app/api/admin/users/${userId}`;
+  const url = new URL(baseUrl);
+  const perPage = params?.per_page ?? 20;
+  const status = params?.status ?? 'Valid';
+  const all = params?.all ?? false;
+  if (all) {
+    url.searchParams.set('all', 'true');
+  } else {
+    url.searchParams.set('per_page', String(perPage));
+    url.searchParams.set('all', 'false');
+  }
+  if (status) url.searchParams.set('status', status);
+  const cats = params?.category_slugs;
+  if (typeof cats === 'string' && cats) {
+    url.searchParams.set('category_slugs', cats);
+  } else if (Array.isArray(cats) && cats.length > 0) {
+    url.searchParams.set('category_slugs', cats.join(','));
+  }
+  const res = await fetch(url.toString(), { method: 'GET', headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as SingleUserListingsResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر جلب إعلانات المستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function fetchCategories(token?: string): Promise<CategoriesResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch('https://api.nasmasr.app/api/categories', { method: 'GET', headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as CategoriesResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر جلب الأقسام');
     throw new Error(message);
   }
   return data;

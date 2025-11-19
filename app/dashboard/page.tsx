@@ -2,9 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { fetchAdminStats, fetchRecentActivities } from '@/services/adminStats';
+import type { AdminStatsResponse } from '@/models/stats';
 
 export default function DashboardPage() {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [statsData, setStatsData] = useState<AdminStatsResponse | null>(null);
+  const [recentActivities, setRecentActivities] = useState<{ action: string; time: string; type: string }[]>([]);
   const [isAuthenticated] = useState(() => {
     try {
       return localStorage.getItem('isAuthenticated') === 'true';
@@ -26,17 +30,69 @@ export default function DashboardPage() {
     return () => clearInterval(timer);
   }, [isAuthenticated, router]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const token = localStorage.getItem('authToken') ?? undefined;
+    fetchAdminStats(token)
+      .then((d) => setStatsData(d))
+      .catch(() => {});
+    fetchRecentActivities(20, token)
+      .then((d) => {
+        const items = Array.isArray(d.activities) ? d.activities : [];
+        const mapped = items.map((a) => {
+          const t = (a.type || '').toLowerCase();
+          const cls = t.includes('approved') ? 'approve' : t.includes('reject') || t.includes('rejected') ? 'reject' : 'user';
+          const action = a.message || '';
+          const time = a.ago || '';
+          return { action, time, type: cls };
+        });
+        setRecentActivities(mapped);
+      })
+      .catch(() => {});
+  }, [isAuthenticated]);
+
   
 
   if (!isAuthenticated) {
     return null;
   }
 
+  const formatTrend = (percent: number, direction: 'up' | 'down') => {
+    const sign = direction === 'up' ? '+' : '-';
+    const v = Math.abs(percent);
+    return `${sign}${v}%`;
+  };
+
+  const cards = statsData?.cards;
   const stats = [
-    { title: 'إجمالي الإعلانات', value: '1,234', icon: '📢', trend: '+12%', color: 'blue' },
-    { title: 'الإعلانات النشطة', value: '856', icon: '✅', trend: '+8%', color: 'green' },
-    { title: 'الاعلانات المعلقة ', value: '94', icon: '🔍', trend: '-3%', color: 'orange' },
-    { title: ' الاعلانات المرفوضة', value: '42', icon: '👥', trend: '+5%', color: 'red' },
+    {
+      title: 'إجمالي الإعلانات',
+      value: typeof cards?.total?.count === 'number' ? cards.total.count.toLocaleString('en-US') : '0',
+      icon: '📢',
+      trend: typeof cards?.total?.percent === 'number' && typeof cards?.total?.direction === 'string' ? formatTrend(cards.total.percent, cards.total.direction) : '0%',
+      color: 'blue',
+    },
+    {
+      title: 'الإعلانات النشطة',
+      value: typeof cards?.active?.count === 'number' ? cards.active.count.toLocaleString('en-US') : '0',
+      icon: '✅',
+      trend: typeof cards?.active?.percent === 'number' && typeof cards?.active?.direction === 'string' ? formatTrend(cards.active.percent, cards.active.direction) : '0%',
+      color: 'green',
+    },
+    {
+      title: 'الاعلانات المعلقة ',
+      value: typeof cards?.pending?.count === 'number' ? cards.pending.count.toLocaleString('en-US') : '0',
+      icon: '🔍',
+      trend: typeof cards?.pending?.percent === 'number' && typeof cards?.pending?.direction === 'string' ? formatTrend(cards.pending.percent, cards.pending.direction) : '0%',
+      color: 'orange',
+    },
+    {
+      title: ' الاعلانات المرفوضة',
+      value: typeof cards?.rejected?.count === 'number' ? cards.rejected.count.toLocaleString('en-US') : '0',
+      icon: '👥',
+      trend: typeof cards?.rejected?.percent === 'number' && typeof cards?.rejected?.direction === 'string' ? formatTrend(cards.rejected.percent, cards.rejected.direction) : '0%',
+      color: 'red',
+    },
   ];
 
   const quickActions = [
@@ -46,11 +102,7 @@ export default function DashboardPage() {
     { title: 'إرسال إشعار', icon: '📣', color: 'pink' },
   ];
 
-  const recentActivities = [
-    { action: 'تمت الموافقة على إعلان سيارة هيونداي', time: 'منذ 2 ساعة', type: 'approve' },
-    { action: 'تم رفض إعلان هاتف مستعمل لعدم وضوح الصور', time: 'منذ 4 ساعات', type: 'reject' },
-    { action: 'قام أحمد محمد بتسجيل حساب جديد', time: 'منذ يوم', type: 'user' },
-  ];
+  
 
   return (
     <div className="dashboard-container">

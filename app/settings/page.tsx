@@ -1,5 +1,7 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { fetchSystemSettings, updateSystemSettings } from '@/services/systemSettings';
+const LS_KEY = 'systemSettingsDraft';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('general');
@@ -23,7 +25,7 @@ export default function SettingsPage() {
     
     // Interface Settings
     showPhoneNumbers: false,
-    advertisersCount: 12,
+    advertisersCount: 0,
     adsPerSection: 8,
     sectionsOrder: ['featured', 'recent', 'popular'],
     sideBanners: true,
@@ -62,20 +64,101 @@ export default function SettingsPage() {
     }
   });
 
-  const handleInputChange = (section: string, field: string, value: any) => {
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        if (draft && typeof draft === 'object') setSettings(draft);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const resp = await fetchSystemSettings();
+        const d = resp?.data;
+        if (!d) return;
+        setSettings((prev) => ({
+          ...prev,
+          privacyPolicy: prev.privacyPolicy || d.privacy_policy || '',
+          termsOfService: prev.termsOfService || (d as { ['terms_conditions-main_']?: string })['terms_conditions-main_'] || '',
+          contactLinks: {
+            facebook: prev.contactLinks.facebook || d.facebook || '',
+            twitter: prev.contactLinks.twitter || d.twitter || '',
+            instagram: prev.contactLinks.instagram || d.instagram || '',
+            whatsapp: prev.contactLinks.whatsapp || '',
+            email: prev.contactLinks.email || d.email || '',
+            phone: prev.contactLinks.phone || '',
+          },
+          supportNumbers: {
+            primary: prev.supportNumbers.primary || d.support_number || '',
+            secondary: prev.supportNumbers.secondary || d.sub_support_number || '',
+            emergency: prev.supportNumbers.emergency || d.emergency_number || '',
+          },
+          showPhoneNumbers: typeof prev.showPhoneNumbers === 'boolean' ? prev.showPhoneNumbers : Boolean(d.show_phone),
+          advertisersCount: typeof prev.advertisersCount === 'number' && prev.advertisersCount !== 0
+            ? prev.advertisersCount
+            : (typeof d.featured_users_count === 'number' ? d.featured_users_count : prev.advertisersCount),
+          adsPerSection: prev.adsPerSection,
+          sectionsOrder: prev.sectionsOrder,
+          sideBanners: prev.sideBanners,
+          passwordRequirements: prev.passwordRequirements,
+          pinSettings: prev.pinSettings,
+          twoFactorAuth: prev.twoFactorAuth,
+          sessionDuration: prev.sessionDuration,
+          smsProvider: prev.smsProvider,
+          emailProvider: prev.emailProvider,
+          pushNotifications: prev.pushNotifications,
+          apiKeys: prev.apiKeys,
+          webhooks: prev.webhooks,
+        }));
+      } catch {}
+    };
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(settings));
+    } catch {}
+  }, [settings]);
+
+  const handleInputChange = (section: string, field: string, value: string | number | boolean) => {
     setSettings(prev => ({
       ...prev,
       [section]: {
-        ...(prev[section as keyof typeof prev] as Record<string, any>),
+        ...(prev[section as keyof typeof prev] as Record<string, string | number | boolean>),
         [field]: value
       }
     }));
   };
 
-  const handleSave = () => {
-    // Here you would typically save to your backend
-    console.log('Settings saved:', settings);
-    alert('تم حفظ الإعدادات بنجاح!');
+  const handleSave = async () => {
+    const payload = {
+      support_number: settings.supportNumbers.primary,
+      sub_support_number: settings.supportNumbers.secondary,
+      emergency_number: settings.supportNumbers.emergency,
+      privacy_policy: settings.privacyPolicy,
+      'terms_conditions-main_': settings.termsOfService,
+      facebook: settings.contactLinks.facebook,
+      twitter: settings.contactLinks.twitter,
+      instagram: settings.contactLinks.instagram,
+      email: settings.contactLinks.email,
+      show_phone: settings.showPhoneNumbers,
+      featured_users_count: settings.advertisersCount,
+    };
+    try {
+      const resp = await updateSystemSettings(payload);
+      if (resp?.status === 'ok') {
+        alert('تم حفظ الإعدادات بنجاح!');
+      } else {
+        alert('تعذر حفظ الإعدادات');
+      }
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'حدث خطأ أثناء الحفظ');
+    }
   };
 
   const tabs = [
@@ -274,7 +357,7 @@ export default function SettingsPage() {
               onChange={(e) => setSettings(prev => ({ ...prev, advertisersCount: parseInt(e.target.value) }))}
             />
           </div>
-          <div className="form-group">
+          {/* <div className="form-group">
             <label htmlFor="adsPerSection">عدد الإعلانات لكل قسم</label>
             <input
               type="number"
@@ -285,7 +368,7 @@ export default function SettingsPage() {
               value={settings.adsPerSection}
               onChange={(e) => setSettings(prev => ({ ...prev, adsPerSection: parseInt(e.target.value) }))}
             />
-          </div>
+          </div> */}
         </div>
         
         {/* <div className="form-group">
@@ -636,12 +719,12 @@ export default function SettingsPage() {
               </svg>
               حفظ الإعدادات
             </button>
-            <button className="btn-reset" onClick={() => window.location.reload()}>
+            {/* <button className="btn-reset" onClick={() => { try { localStorage.removeItem(LS_KEY); } catch {}; window.location.reload(); }}>
               <svg className="btn-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
               إعادة تعيين
-            </button>
+            </button> */}
           </div>
         </div>
       </div>
