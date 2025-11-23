@@ -21,9 +21,9 @@ const navItems = [
   { href: "/moderation", label: "الموافقات والمراجعة", icon: "/star.png" },
   { href: "/users", label: " المستخدمون والمعلِنون والمناديب ", icon: "/profile.png" },
   { href: "/reports", label: "التقارير والإحصائيات", icon: "/clipboard.png" },
-  { href: "/notifications", label: "الإشعارات ", icon: "/chat2.png" },
+  { href: "/notifications", label: "الإشعارات ", icon: "/bell.png" },
   { href: "/messages", label: "الرسائل", icon: "/chat2.png" },
-  { href: "/customer-chats", label: " محادثات العملاء ", icon: "/chat2.png" },
+  { href: "/customer-chats", label: " محادثات العملاء ", icon: "/chat3.png" },
   { href: "/settings", label: "الضبط العام", icon: "/cogwheel.png" }
 ];
 

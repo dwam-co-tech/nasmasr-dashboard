@@ -1,4 +1,4 @@
-import type { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse } from '@/models/users';
+import type { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse } from '@/models/users';
 
 export async function fetchUsersSummary(token?: string): Promise<UsersSummaryResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
@@ -172,6 +172,25 @@ export async function fetchCategories(token?: string): Promise<CategoriesRespons
   if (!res.ok || !data) {
     const err = raw as { error?: string; message?: string } | null;
     const message = (err?.error || err?.message || 'تعذر جلب الأقسام');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function assignUserPackage(payload: AssignUserPackagePayload, token?: string): Promise<AssignUserPackageResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch('https://api.nasmasr.app/api/admin/user-packages', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as AssignUserPackageResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر حفظ الباقة للمستخدم');
     throw new Error(message);
   }
   return data;

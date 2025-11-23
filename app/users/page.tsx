@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { fetchUsersSummary, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories } from '@/services/users';
+import { fetchUsersSummary, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage } from '@/services/users';
 
 interface User {
   id: string;
@@ -39,6 +39,18 @@ interface AdItem {
   publishDate: string;
   category: string;
   image: string;
+  categorySlug?: string;
+  price?: string | null;
+  contactPhone?: string | null;
+  whatsappPhone?: string | null;
+  planType?: string;
+  views?: number;
+  rank?: number;
+  governorate?: string | null;
+  city?: string | null;
+  lat?: string;
+  lng?: string;
+  attributes?: Record<string, string | undefined | null>;
 }
 
 const toImageUrl = (src: string | null | undefined): string => {
@@ -178,11 +190,6 @@ export default function UsersPage() {
     missing: 'مفقودات',
   };
 
-  const SECTION_AR_TO_SLUG: Record<string, string> = Object.keys(CATEGORY_LABELS_AR).reduce((acc, slug) => {
-    const label = CATEGORY_LABELS_AR[slug];
-    acc[label] = slug;
-    return acc;
-  }, {} as Record<string, string>);
 
   // Packages modal state
   const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
@@ -339,15 +346,33 @@ export default function UsersPage() {
           ? { per_page: 20, status: 'Valid', all: false, category_slugs: selectedCategory }
           : { per_page: 20, status: 'Valid', all: false };
         const resp = await fetchUserListings(Number(selectedUser.id), params);
-        const mapped = resp.listings.map(l => ({
-          id: String(l.id),
-          title: l.title,
-          status: l.status,
-          publishDate: l.published_at,
-          category: l.section,
-          image: toImageUrl(l.image),
-          categorySlug: SECTION_AR_TO_SLUG[l.section] ?? l.section,
-        }));
+        const mapped = resp.listings.map(l => {
+          const title = l.attributes?.property_type && l.attributes?.contract_type
+            ? `${l.attributes.property_type} | ${l.attributes.contract_type}`
+            : (l.attributes?.main_category && l.attributes?.sub_category
+              ? `${l.attributes.main_category} | ${l.attributes.sub_category}`
+              : (l.category_name || l.category || `#${l.id}`));
+          return {
+            id: String(l.id),
+            title,
+            status: 'منشور',
+            publishDate: l.created_at,
+            category: l.category_name || l.category,
+            image: toImageUrl(l.main_image_url),
+            categorySlug: l.category,
+            price: l.price,
+            contactPhone: l.contact_phone,
+            whatsappPhone: l.whatsapp_phone,
+            planType: l.plan_type,
+            views: l.views,
+            rank: l.rank,
+            governorate: l.governorate,
+            city: l.city,
+            lat: l.lat,
+            lng: l.lng,
+            attributes: l.attributes as Record<string, string | undefined | null>,
+          } as AdItem;
+        });
         setAds(mapped);
       } catch (e) {
         setAds([]);
@@ -360,7 +385,7 @@ export default function UsersPage() {
     ? ads
     : ads.filter(
         (ad) =>
-          (ad as any).categorySlug === selectedCategory ||
+          ad.categorySlug === selectedCategory ||
           ad.category === (CATEGORY_LABELS_AR[selectedCategory] ?? selectedCategory)
       );
   const filteredUsers = users
@@ -480,23 +505,34 @@ export default function UsersPage() {
     setPackagesForm(prev => ({ ...prev, [field]: value } as UserPackage));
   };
 
-  const savePackages = () => {
+  const savePackages = async () => {
     if (!selectedUserForPackages) return;
-    const updatedUser = {
-      ...selectedUserForPackages,
-      package: {
-        plan: packagesForm.plan,
-        adsCount: typeof packagesForm.adsCount === 'number' ? packagesForm.adsCount : Number(packagesForm.adsCount) || 0,
-        expiryDate: packagesForm.expiryDate,
-      },
-    } as User;
-    setUsers(prev => prev.map(u => (u.id === selectedUserForPackages.id ? updatedUser : u)));
-    if (selectedUser?.id === selectedUserForPackages.id) {
-      setSelectedUser(updatedUser);
+    const featured = typeof packagesForm.adsCount === 'number' ? packagesForm.adsCount : Number(packagesForm.adsCount) || 0;
+    const today = new Date();
+    const exp = new Date(packagesForm.expiryDate);
+    const msInDay = 24 * 60 * 60 * 1000;
+    const days = Math.max(0, Math.ceil((exp.setHours(0,0,0,0) - today.setHours(0,0,0,0)) / msInDay));
+    try {
+      const resp = await assignUserPackage({ user_id: Number(selectedUserForPackages.id), featured_ads: featured, days });
+      const d = resp.data;
+      const updatedUser = {
+        ...selectedUserForPackages,
+        package: {
+          plan: packagesForm.plan,
+          adsCount: d.featured_ads,
+          expiryDate: d.expire_date.split('T')[0],
+        },
+      } as User;
+      setUsers(prev => prev.map(u => (u.id === selectedUserForPackages.id ? updatedUser : u)));
+      if (selectedUser?.id === selectedUserForPackages.id) {
+        setSelectedUser(updatedUser);
+      }
+      setIsPackagesModalOpen(false);
+      setSelectedUserForPackages(null);
+      showToast(resp.message || 'تم تحديث الباقة بنجاح', 'success');
+    } catch (e) {
+      showToast('تعذر حفظ الباقة للمستخدم', 'error');
     }
-    setIsPackagesModalOpen(false);
-    setSelectedUserForPackages(null);
-    showToast('تم تحديث الباقة بنجاح', 'success');
   };
 
   // Calculate package duration days based on acceptance, ad start, expiry
@@ -1008,8 +1044,23 @@ export default function UsersPage() {
                         </div>
                         <div className="ad-details-rows">
                           <div className="detail-row"><span className="detail-label">القسم</span><span className="detail-value">{adInModal.category}</span></div>
+                          <div className="detail-row"><span className="detail-label">القسم (slug)</span><span className="detail-value">{adInModal.categorySlug}</span></div>
                           <div className="detail-row"><span className="detail-label">الحالة</span><span className="detail-value">{adInModal.status}</span></div>
                           <div className="detail-row"><span className="detail-label">تاريخ النشر</span><span className="detail-value">{adInModal.publishDate}</span></div>
+                          <div className="detail-row"><span className="detail-label">نوع العقار</span><span className="detail-value">{adInModal.attributes?.property_type ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">نوع العقد</span><span className="detail-value">{adInModal.attributes?.contract_type ?? '-'}</span></div>
+                          {/* <div className="detail-row"><span className="detail-label">القسم الرئيسي</span><span className="detail-value">{adInModal.attributes?.main_category ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">القسم الفرعي</span><span className="detail-value">{adInModal.attributes?.sub_category ?? '-'}</span></div> */}
+                          <div className="detail-row"><span className="detail-label">السعر</span><span className="detail-value">{adInModal.price ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">الهاتف</span><span className="detail-value">{adInModal.contactPhone ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">واتساب</span><span className="detail-value">{adInModal.whatsappPhone ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">الخطة</span><span className="detail-value">{adInModal.planType ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">المشاهدات</span><span className="detail-value">{typeof adInModal.views === 'number' ? adInModal.views : '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">الترتيب</span><span className="detail-value">{typeof adInModal.rank === 'number' ? adInModal.rank : '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">المحافظة</span><span className="detail-value">{adInModal.governorate ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">المدينة</span><span className="detail-value">{adInModal.city ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">إحداثيات</span><span className="detail-value">{adInModal.lat ?? '-'}, {adInModal.lng ?? '-'}</span></div>
+                          <div className="detail-row"><span className="detail-label">رقم الإعلان</span><span className="detail-value">{adInModal.id}</span></div>
                         </div>
                       </div>
                     </div>

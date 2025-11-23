@@ -65,19 +65,35 @@ export interface CreateOtpResponse {
   otp: number;
 }
 
+export interface ListingAttributes {
+  property_type?: string;
+  contract_type?: string;
+  main_category?: string;
+  sub_category?: string;
+}
+
 export interface UserListing {
+  attributes: ListingAttributes;
+  governorate: string | null;
+  city: string | null;
+  price: string | null;
+  contact_phone: string | null;
+  whatsapp_phone: string | null;
+  main_image_url: string | null;
+  created_at: string;
+  plan_type: string;
   id: number;
-  title: string;
-  image: string | null;
-  section: string;
-  status: string;
-  published_at: string;
+  lat: string;
+  lng: string;
+  rank: number;
+  views: number;
+  category: string;
+  category_name: string;
 }
 
 export interface SingleUserListingsResponse {
-  user: UserSummary;
   listings: UserListing[];
-  meta: UsersMeta;
+  meta: { total: number };
 }
 
 export interface CategoryItem {
@@ -86,4 +102,33 @@ export interface CategoryItem {
 
 export interface CategoriesResponse {
   data: CategoryItem[];
+}
+
+export interface AssignUserPackagePayload {
+  user_id: number;
+  featured_ads: number;
+  days: number;
+}
+
+export interface UserPackageData {
+  id: number;
+  user_id: number;
+  featured_ads: number;
+  standard_ads: number;
+  featured_ads_used: number;
+  standard_ads_used: number;
+  days: number;
+  start_date: string;
+  expire_date: string;
+  created_at: string;
+  updated_at: string;
+  featured_ads_remaining: number;
+  standard_ads_remaining: number;
+  active: boolean;
+}
+
+export interface AssignUserPackageResponse {
+  success: boolean;
+  message: string;
+  data: UserPackageData;
 }
