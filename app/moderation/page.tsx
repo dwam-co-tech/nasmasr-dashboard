@@ -703,6 +703,7 @@ export default function ModerationPage() {
   });
   const [newImageUrl, setNewImageUrl] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [autoApprove, setAutoApprove] = useState<boolean>(false);
   const uniqueCategories = Array.from(new Set(ads.map(ad => ad.category)));
   
   // حساب عدد الإعلانات قيد المراجعة
@@ -715,6 +716,18 @@ export default function ModerationPage() {
   
   // حساب إجمالي الإعلانات
   const totalAdsCount = ads.length;
+
+  useEffect(() => {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('moderation:autoApprove') : null;
+    setAutoApprove(raw === 'true');
+  }, []);
+
+  useEffect(() => {
+    if (!autoApprove) return;
+    const pendingIds = ads.filter(a => a.status === 'pending').map(a => a.id);
+    if (pendingIds.length === 0) return;
+    pendingIds.forEach((id) => handleAction(id, 'approve'));
+  }, [autoApprove, ads]);
 
   const CategorySelect = ({ options, value, onChange, placeholder, getCount, className }: { options: string[]; value: string; onChange: (v: string) => void; placeholder: string; getCount: (cat: string) => number; className?: string }) => {
     const [open, setOpen] = useState(false);
@@ -1035,14 +1048,34 @@ export default function ModerationPage() {
           </div> */}
             {/* <div className="queue-filters"> */}
               {/* <label className="filter-label">القسم</label> */}
-              <CategorySelect
-                options={uniqueCategories}
-                value={categoryFilter}
-                onChange={(v) => setCategoryFilter(v)}
-                placeholder={`كل الأقسام (${totalAdsCount})`}
-                getCount={getCategoryCount}
-                className="category-select-wide"
-              />
+          <div className="filters-row">
+            <CategorySelect
+              options={uniqueCategories}
+              value={categoryFilter}
+              onChange={(v) => setCategoryFilter(v)}
+              placeholder={`كل الأقسام (${totalAdsCount})`}
+              getCount={getCategoryCount}
+              className="category-select-wide"
+            />
+            <label className="toggle-label compact">
+              <span className="toggle-text">الموافقة التلقائية على الإعلانات</span>
+              <div className="toggle-switch-container">
+                <input
+                  type="checkbox"
+                  className="toggle-input"
+                  checked={autoApprove}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setAutoApprove(v);
+                    localStorage.setItem('moderation:autoApprove', String(v));
+                    showToast(v ? 'success' : 'info', v ? 'تم تفعيل الموافقة التلقائية' : 'تم إيقاف الموافقة التلقائية');
+                  }}
+                />
+                <span className="toggle-slider"></span>
+                <span className="toggle-status">{autoApprove ? 'مفعل' : 'مغلق'}</span>
+              </div>
+            </label>
+          </div>
             {/* </div> */}
           </div>
 

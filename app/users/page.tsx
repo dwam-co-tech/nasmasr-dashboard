@@ -27,9 +27,16 @@ interface Toast {
 }
 
 interface UserPackage {
-  plan: 'متميز' | 'ستاندر';
-  adsCount: number;
-  expiryDate: string; // YYYY-MM-DD
+  featuredAds: number;
+  featuredDays: number;
+  startFeaturedNow: boolean;
+  featuredStartDate?: string | null;
+  featuredExpiryDate?: string | null;
+  standardAds: number;
+  standardDays: number;
+  startStandardNow: boolean;
+  standardStartDate?: string | null;
+  standardExpiryDate?: string | null;
 }
 
 interface AdItem {
@@ -142,7 +149,7 @@ export default function UsersPage() {
     const loadCats = async () => {
       try {
         const resp = await fetchCategories();
-        const slugs = Array.isArray(resp?.data) ? resp.data.map(c => c.slug).filter(Boolean) : [];
+        const slugs = Array.isArray(resp?.data) ? resp.data.map((c: { slug: string }) => c.slug).filter(Boolean) : [];
         setCategories(['all', ...slugs]);
       } catch (e) {
         setCategories(['all']);
@@ -195,11 +202,16 @@ export default function UsersPage() {
   const [isPackagesModalOpen, setIsPackagesModalOpen] = useState(false);
   const [selectedUserForPackages, setSelectedUserForPackages] = useState<User | null>(null);
   const [packagesForm, setPackagesForm] = useState<UserPackage>({
-    plan: 'ستاندر',
-    adsCount: 0,
-    expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0],
+    featuredAds: 0,
+    featuredDays: 0,
+    startFeaturedNow: false,
+    featuredStartDate: null,
+    featuredExpiryDate: null,
+    standardAds: 0,
+    standardDays: 0,
+    startStandardNow: false,
+    standardStartDate: null,
+    standardExpiryDate: null,
   });
 
   // Verify modal state
@@ -392,7 +404,7 @@ export default function UsersPage() {
     .filter((user) => {
       if (roleFilter === 'users') return user.role === 'user';
       if (roleFilter === 'advertisers') return user.role === 'advertiser';
-      if (roleFilter === 'delegates') return user.role === 'delegate';
+      if (roleFilter === 'delegates') return user.role === 'delegate' || user.role === 'representative';
       return true;
     })
     .filter(user =>
@@ -484,16 +496,75 @@ export default function UsersPage() {
 
   const openPackagesModal = (user: User) => {
     setSelectedUserForPackages(user);
-    setPackagesForm(
-      user.package ?? {
-        plan: 'ستاندر',
-        adsCount: user.adsCount ?? 0,
-        expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-          .toISOString()
-          .split('T')[0],
+    try {
+      const raw = localStorage.getItem('userPackageData:' + user.id);
+      if (raw) {
+        const data = JSON.parse(raw);
+        setPackagesForm({
+          featuredAds: Number(data.featured_ads) || 0,
+          featuredDays: Number(data.featured_days) || 0,
+          startFeaturedNow: Boolean(data.featured_active),
+          featuredStartDate: data.featured_start_date ? String(data.featured_start_date).split('T')[0] : null,
+          featuredExpiryDate: data.featured_expire_date ? String(data.featured_expire_date).split('T')[0] : null,
+          standardAds: Number(data.standard_ads) || 0,
+          standardDays: Number(data.standard_days) || 0,
+          startStandardNow: Boolean(data.standard_active),
+          standardStartDate: data.standard_start_date ? String(data.standard_start_date).split('T')[0] : null,
+          standardExpiryDate: data.standard_expire_date ? String(data.standard_expire_date).split('T')[0] : null,
+        });
+      } else {
+        setPackagesForm(
+          user.package ?? {
+            featuredAds: 0,
+            featuredDays: 0,
+            startFeaturedNow: false,
+            featuredStartDate: null,
+            featuredExpiryDate: null,
+            standardAds: 0,
+            standardDays: 0,
+            startStandardNow: false,
+            standardStartDate: null,
+            standardExpiryDate: null,
+          }
+        );
       }
-    );
+    } catch {
+      setPackagesForm(
+        user.package ?? {
+          featuredAds: 0,
+          featuredDays: 0,
+          startFeaturedNow: false,
+          featuredStartDate: null,
+          featuredExpiryDate: null,
+          standardAds: 0,
+          standardDays: 0,
+          startStandardNow: false,
+          standardStartDate: null,
+          standardExpiryDate: null,
+        }
+      );
+    }
     setIsPackagesModalOpen(true);
+  };
+
+  const persistPackagesLocal = (uid?: number | string) => {
+    try {
+      const id = uid ?? selectedUserForPackages?.id;
+      if (!id) return;
+      const payload = {
+        featured_ads: Number(packagesForm.featuredAds) || 0,
+        featured_days: Number(packagesForm.featuredDays) || 0,
+        featured_start_date: packagesForm.featuredStartDate ? new Date(packagesForm.featuredStartDate).toISOString() : null,
+        featured_expire_date: packagesForm.featuredExpiryDate ? new Date(packagesForm.featuredExpiryDate).toISOString() : null,
+        standard_ads: Number(packagesForm.standardAds) || 0,
+        standard_days: Number(packagesForm.standardDays) || 0,
+        standard_start_date: packagesForm.standardStartDate ? new Date(packagesForm.standardStartDate).toISOString() : null,
+        standard_expire_date: packagesForm.standardExpiryDate ? new Date(packagesForm.standardExpiryDate).toISOString() : null,
+        featured_active: Boolean(packagesForm.startFeaturedNow),
+        standard_active: Boolean(packagesForm.startStandardNow),
+      };
+      localStorage.setItem('userPackageData:' + id, JSON.stringify(payload));
+    } catch {}
   };
 
   const closePackagesModal = () => {
@@ -501,26 +572,37 @@ export default function UsersPage() {
     setSelectedUserForPackages(null);
   };
 
-  const handlePackagesChange = (field: keyof UserPackage, value: string | number) => {
+  const handlePackagesChange = (field: keyof UserPackage, value: string | number | boolean) => {
     setPackagesForm(prev => ({ ...prev, [field]: value } as UserPackage));
   };
 
   const savePackages = async () => {
     if (!selectedUserForPackages) return;
-    const featured = typeof packagesForm.adsCount === 'number' ? packagesForm.adsCount : Number(packagesForm.adsCount) || 0;
-    const today = new Date();
-    const exp = new Date(packagesForm.expiryDate);
-    const msInDay = 24 * 60 * 60 * 1000;
-    const days = Math.max(0, Math.ceil((exp.setHours(0,0,0,0) - today.setHours(0,0,0,0)) / msInDay));
     try {
-      const resp = await assignUserPackage({ user_id: Number(selectedUserForPackages.id), featured_ads: featured, days });
+      const resp = await assignUserPackage({
+        user_id: Number(selectedUserForPackages.id),
+        featured_ads: Number(packagesForm.featuredAds) || 0,
+        featured_days: Number(packagesForm.featuredDays) || 0,
+        ...(packagesForm.startFeaturedNow ? { start_featured_now: true } : {}),
+        standard_ads: Number(packagesForm.standardAds) || 0,
+        standard_days: Number(packagesForm.standardDays) || 0,
+        ...(packagesForm.startStandardNow ? { start_standard_now: true } : {}),
+      });
       const d = resp.data;
+      try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch {}
       const updatedUser = {
         ...selectedUserForPackages,
         package: {
-          plan: packagesForm.plan,
-          adsCount: d.featured_ads,
-          expiryDate: d.expire_date.split('T')[0],
+          featuredAds: d.featured_ads,
+          featuredDays: d.featured_days,
+          startFeaturedNow: Boolean(d.featured_active),
+          featuredStartDate: d.featured_start_date ? String(d.featured_start_date).split('T')[0] : null,
+          featuredExpiryDate: d.featured_expire_date ? String(d.featured_expire_date).split('T')[0] : null,
+          standardAds: d.standard_ads,
+          standardDays: d.standard_days,
+          startStandardNow: Boolean(d.standard_active),
+          standardStartDate: d.standard_start_date ? String(d.standard_start_date).split('T')[0] : null,
+          standardExpiryDate: d.standard_expire_date ? String(d.standard_expire_date).split('T')[0] : null,
         },
       } as User;
       setUsers(prev => prev.map(u => (u.id === selectedUserForPackages.id ? updatedUser : u)));
@@ -534,6 +616,39 @@ export default function UsersPage() {
       showToast('تعذر حفظ الباقة للمستخدم', 'error');
     }
   };
+
+  useEffect(() => {
+    if (!isPackagesModalOpen || !selectedUserForPackages) return;
+    persistPackagesLocal(selectedUserForPackages.id);
+  }, [packagesForm.featuredAds, packagesForm.featuredDays, packagesForm.featuredStartDate, packagesForm.featuredExpiryDate, packagesForm.startFeaturedNow, packagesForm.standardAds, packagesForm.standardDays, packagesForm.standardStartDate, packagesForm.standardExpiryDate, packagesForm.startStandardNow, isPackagesModalOpen, selectedUserForPackages]);
+
+  const getRemainingByDates = (startDate?: string | null, expireDate?: string | null): number => {
+    if (!expireDate) return 0;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const start = startDate ? new Date(startDate) : new Date();
+    const end = new Date(expireDate);
+    const now = new Date();
+    const base = Math.max(start.getTime(), now.getTime());
+    const totalDays = Math.ceil((end.getTime() - start.getTime()) / dayMs);
+    const elapsedDays = Math.floor((now.getTime() - start.getTime()) / dayMs);
+    const remaining = totalDays - elapsedDays;
+    return remaining > 0 ? remaining : 0;
+  };
+
+  const getProgressPercent = (startDate?: string | null, expireDate?: string | null): number => {
+    if (!startDate || !expireDate) return 0;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const start = new Date(startDate);
+    const end = new Date(expireDate);
+    const now = new Date();
+    if (end.getTime() <= start.getTime()) return 100;
+    const total = end.getTime() - start.getTime();
+    const elapsed = Math.max(0, Math.min(total, now.getTime() - start.getTime()));
+    const pct = Math.round((elapsed / total) * 100);
+    return pct < 0 ? 0 : pct > 100 ? 100 : pct;
+  };
+
+  // moved below countdownTick declaration
 
   // Calculate package duration days based on acceptance, ad start, expiry
   const calculatePackageDays = (user: User | null, expiryDate: string): number => {
@@ -575,6 +690,17 @@ export default function UsersPage() {
     const timer = setInterval(() => setCountdownTick(t => t + 1), 60 * 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const remF = getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate);
+    if (packagesForm.startFeaturedNow && packagesForm.featuredExpiryDate && remF <= 0) {
+      showToast('انتهت الباقة المتميزة', 'warning');
+    }
+    const remS = getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate);
+    if (packagesForm.startStandardNow && packagesForm.standardExpiryDate && remS <= 0) {
+      showToast('انتهت الباقة الستاندر', 'warning');
+    }
+  }, [countdownTick, packagesForm.startFeaturedNow, packagesForm.featuredExpiryDate, packagesForm.featuredStartDate, packagesForm.startStandardNow, packagesForm.standardExpiryDate, packagesForm.standardStartDate]);
 
   const handleViewProfile = (user: User) => {
     setSelectedUser(user);
@@ -1274,39 +1400,146 @@ export default function UsersPage() {
               <button className="modal-close" onClick={closePackagesModal}>✕</button>
             </div>
             <div className="modal-content">
-              <div className="inline-fields">
-                <div className="field">
-                  <label>الباقة</label>
-                  <select
-                    className="form-select"
-                    value={packagesForm.plan}
-                    onChange={(e) => handlePackagesChange('plan', e.target.value as UserPackage['plan'])}
-                  >
-                    <option value="متميز">متميز</option>
-                    <option value="ستاندر">ستاندر</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label>عدد الإعلانات</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    min={0}
-                    value={packagesForm.adsCount}
-                    onChange={(e) => handlePackagesChange('adsCount', Number(e.target.value))}
-                  />
-                </div>
-                <div className="field expiry">
-                  <label>تاريخ انتهاء الصلاحية</label>
-                  <div className="input-with-days">
-                    <input
-                      type="date"
-                      className="form-input has-days"
-                      value={packagesForm.expiryDate}
-                      onChange={(e) => handlePackagesChange('expiryDate', e.target.value)}
-                    />
-                    <div className="days-inside">متبقي: {getRemainingDays(selectedUserForPackages, packagesForm.expiryDate)} يوم</div>
+              <div className="plan-cards">
+                <div className="plan-card">
+                  <div className="plan-title">الباقة المتميزة <span className={`status-pill ${packagesForm.startFeaturedNow ? (getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate) > 0 ? 'success' : 'danger') : 'neutral'}`}>{packagesForm.startFeaturedNow ? (getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate) > 0 ? 'نشطة' : 'منتهية') : 'غير نشطة'}</span></div>
+                  <div className="plan-meta">
+                    <div className="meta-item"><span className="meta-label">تاريخ البدء</span><span className="meta-value">{packagesForm.featuredStartDate || '—'}</span></div>
+                    <div className="meta-item"><span className="meta-label">تاريخ الانتهاء</span><span className="meta-value">{packagesForm.featuredExpiryDate || '—'}</span></div>
+                    <div className="meta-item remaining"><span className="meta-label">المتبقي</span><span className="meta-value">{getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate)} يوم</span></div>
                   </div>
+                  <div className="plan-progress"><div className="progress-track"><div className="progress-bar" style={{ width: `${getProgressPercent(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate)}%` }}></div></div><div className="progress-label">{getProgressPercent(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate)}%</div></div>
+                  <div className="plan-grid">
+                    <div className="field">
+                      <label>عدد الإعلانات المتميزة</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min={0}
+                        value={packagesForm.featuredAds}
+                        onChange={(e) => handlePackagesChange('featuredAds', Number(e.target.value))}
+                      />
+                    </div>
+                    {/* <div className="field">
+                      <label>عدد الأيام للمتميزة</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min={0}
+                        value={packagesForm.featuredDays}
+                        onChange={(e) => handlePackagesChange('featuredDays', Number(e.target.value))}
+                      />
+                    </div> */}
+                    <div className="field expiry">
+                      <label>تاريخ انتهاء المتميزة</label>
+                      <div className="input-with-days">
+                        <input
+                          type="date"
+                          className="form-input has-days"
+                          value={packagesForm.featuredExpiryDate || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            handlePackagesChange('featuredExpiryDate', val);
+                            if (packagesForm.startFeaturedNow) {
+                              const dayMs = 24 * 60 * 60 * 1000;
+                              const now = new Date(); now.setHours(0,0,0,0);
+                              const exp = new Date(val); exp.setHours(0,0,0,0);
+                              const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
+                              handlePackagesChange('featuredDays', days);
+                            }
+                          }}
+                        />
+                        <div className="days-inside">متبقي: {getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate)} يوم</div>
+                      </div>
+                    </div>
+                  </div>
+                  <label className="toggle-label compact">
+                    <span className="toggle-text">بدء الآن</span>
+                    <div className="toggle-switch-container">
+                      <input
+                        type="checkbox"
+                        className="toggle-input"
+                        checked={packagesForm.startFeaturedNow}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          handlePackagesChange('startFeaturedNow', v);
+                          if (v) handlePackagesChange('featuredStartDate', new Date().toISOString().split('T')[0]);
+                        }}
+                      />
+                      <span className="toggle-slider"></span>
+                      <span className="toggle-status">{packagesForm.startFeaturedNow ? 'مفعل' : 'مغلق'}</span>
+                    </div>
+                  </label>
+                </div>
+                <div className="plan-card">
+                  <div className="plan-title">الباقة الستاندر <span className={`status-pill ${packagesForm.startStandardNow ? (getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate) > 0 ? 'success' : 'danger') : 'neutral'}`}>{packagesForm.startStandardNow ? (getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate) > 0 ? 'نشطة' : 'منتهية') : 'غير نشطة'}</span></div>
+                  <div className="plan-meta">
+                    <div className="meta-item"><span className="meta-label">تاريخ البدء</span><span className="meta-value">{packagesForm.standardStartDate || '—'}</span></div>
+                    <div className="meta-item"><span className="meta-label">تاريخ الانتهاء</span><span className="meta-value">{packagesForm.standardExpiryDate || '—'}</span></div>
+                    <div className="meta-item remaining"><span className="meta-label">المتبقي</span><span className="meta-value">{getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate)} يوم</span></div>
+                  </div>
+                  <div className="plan-progress"><div className="progress-track"><div className="progress-bar" style={{ width: `${getProgressPercent(packagesForm.standardStartDate, packagesForm.standardExpiryDate)}%` }}></div></div><div className="progress-label">{getProgressPercent(packagesForm.standardStartDate, packagesForm.standardExpiryDate)}%</div></div>
+                  <div className="plan-grid">
+                    <div className="field">
+                      <label>عدد الإعلانات الستاندر</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min={0}
+                        value={packagesForm.standardAds}
+                        onChange={(e) => handlePackagesChange('standardAds', Number(e.target.value))}
+                      />
+                    </div>
+                    {/* <div className="field">
+                      <label>عدد الأيام للستاندر</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min={0}
+                        value={packagesForm.standardDays}
+                        onChange={(e) => handlePackagesChange('standardDays', Number(e.target.value))}
+                      />
+                    </div> */}
+                    <div className="field expiry">
+                      <label>تاريخ انتهاء الستاندر</label>
+                      <div className="input-with-days">
+                        <input
+                          type="date"
+                          className="form-input has-days"
+                          value={packagesForm.standardExpiryDate || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            handlePackagesChange('standardExpiryDate', val);
+                            if (packagesForm.startStandardNow) {
+                              const dayMs = 24 * 60 * 60 * 1000;
+                              const now = new Date(); now.setHours(0,0,0,0);
+                              const exp = new Date(val); exp.setHours(0,0,0,0);
+                              const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
+                              handlePackagesChange('standardDays', days);
+                            }
+                          }}
+                        />
+                        <div className="days-inside">متبقي: {getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate)} يوم</div>
+                      </div>
+                    </div>
+                  </div>
+                  <label className="toggle-label compact">
+                    <span className="toggle-text">بدء الآن</span>
+                    <div className="toggle-switch-container">
+                      <input
+                        type="checkbox"
+                        className="toggle-input"
+                        checked={packagesForm.startStandardNow}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          handlePackagesChange('startStandardNow', v);
+                          if (v) handlePackagesChange('standardStartDate', new Date().toISOString().split('T')[0]);
+                        }}
+                      />
+                      <span className="toggle-slider"></span>
+                      <span className="toggle-status">{packagesForm.startStandardNow ? 'مفعل' : 'مغلق'}</span>
+                    </div>
+                  </label>
                 </div>
               </div>
             </div>

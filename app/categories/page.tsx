@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { fetchCarMakes, fetchCategoryFields, fetchGovernorates, postAdminGovernorates } from '@/services/makes';
+import { fetchCarMakes, fetchCategoryFields, fetchCategoryFieldMaps, fetchGovernorates, postAdminGovernorates, createGovernorate, createCity, updateGovernorate, deleteGovernorate, updateCity, deleteCity, fetchGovernorateById } from '@/services/makes';
 
 interface Category {
   id: number;
@@ -95,24 +95,127 @@ export default function CategoriesPage() {
   }, []);
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
-    fetchCategoryFields('cars', token)
-      .then((fields) => {
-        for (const f of fields) {
-          const name = String(f.field_name || '').toLowerCase();
-          const options = Array.isArray(f.options) ? f.options : [];
-          const isYear = name.includes('سنة') || name.includes('year') || name.includes('تصنيع') || name.includes('model') || name.includes('manufacture') || name.includes('production');
-          const isKm = name.includes('كيلو') || name.includes('كم') || name.includes('km') || name.includes('kilo') || name.includes('mileage');
-          const isType = name.includes('النوع') || name.includes('type');
-          const isExteriorColor = (name.includes('اللون') && name.includes('خارجي')) || name.includes('exterior') || (name.includes('color') && !name.includes('داخل'));
-          const isTransmission = name.includes('فتيس') || name.includes('ناقل') || name.includes('transmission') || name.includes('gear');
-          const isFuel = name.includes('وقود') || name.includes('fuel') || name.includes('gas');
-          if (isYear) setYearOptions(options.slice().sort((a, b) => Number(b) - Number(a)));
-          else if (isKm) setKmOptions(options);
-          else if (isFuel) setFuelOptions(options);
-          else if (isTransmission) setTransmissionOptions(options);
-          else if (isExteriorColor) setExteriorColorOptions(options);
-          else if (isType) setCarTypeOptions(options);
-        }
+    fetchCategoryFieldMaps([
+      'cars',
+      'cars_rent',
+      'real_estate',
+      'teachers',
+      'doctors',
+      'jobs',
+      'spare-parts',
+      'stores',
+      'restaurants',
+      'groceries',
+      'food-products',
+      'electronics',
+      'home-tools',
+      'furniture',
+      'health',
+      'education',
+      'shipping',
+      'mens-clothes',
+      'watches-jewelry',
+      'free-professions',
+      'kids-toys',
+      'gym',
+      'construction',
+      'maintenance',
+      'car-services',
+      'home-services',
+      'lighting-decor',
+      'animals',
+      'farm-products',
+      'wholesale',
+      'production-lines',
+      'light-vehicles',
+      'heavy-transport',
+      'tools',
+      'home-appliances',
+      'missing',
+    ], token)
+      .then((maps) => {
+        const pick = (obj: Record<string, string[]> | undefined, keys: string[]): string[] => {
+          if (!obj) return [];
+          for (const [k, v] of Object.entries(obj)) {
+            const name = String(k || '').toLowerCase();
+            if (keys.some((kw) => name.includes(kw))) return Array.isArray(v) ? v : [];
+          }
+          return [];
+        };
+        const buildMainSubs = (obj: Record<string, string[]> | undefined, mainKeys: string[], subKeys: string[]): Record<string, string[]> => {
+          const mains = pick(obj, mainKeys);
+          const subs = pick(obj, subKeys);
+          const out: Record<string, string[]> = {};
+          for (const m of mains) out[m] = subs;
+          return out;
+        };
+        const cars = maps['cars'];
+        const year = pick(cars, ['سنة', 'year', 'تصنيع', 'model', 'manufacture', 'production']);
+        const kms = pick(cars, ['كيلو', 'كم', 'km', 'kilo', 'mileage']);
+        const fuel = pick(cars, ['وقود', 'fuel', 'gas']);
+        const trans = pick(cars, ['فتيس', 'ناقل', 'transmission', 'gear']);
+        const exterior = pick(cars, ['خارجي', 'exterior', 'color']);
+        const ctype = pick(cars, ['النوع', 'type']);
+        if (year.length) setYearOptions(year.slice().sort((a, b) => Number(b) - Number(a)));
+        if (kms.length) setKmOptions(kms);
+        if (fuel.length) setFuelOptions(fuel);
+        if (trans.length) setTransmissionOptions(trans);
+        if (exterior.length) setExteriorColorOptions(exterior);
+        if (ctype.length) setCarTypeOptions(ctype);
+        const rent = maps['cars_rent'];
+        const rYear = pick(rent, ['سنة', 'year', 'تصنيع', 'model']);
+        const drv = pick(rent, ['سائق', 'driver']);
+        if (rYear.length) setRentalYearOptions(rYear.slice().sort((a, b) => Number(b) - Number(a)));
+        if (drv.length) setDriverOptions(drv);
+        const real = maps['real_estate'];
+        const prop = pick(real, ['نوع العقار', 'property', 'estate', 'type']);
+        const contract = pick(real, ['عقد', 'contract', 'rent', 'sale']);
+        if (prop.length) setPropertyTypeOptions(prop);
+        if (contract.length) setContractTypeOptions(contract);
+        const t = maps['teachers'];
+        const tSpec = pick(t, ['تخصص', 'specialty', 'subject']);
+        if (tSpec.length) setTeacherSpecialtyOptions(tSpec);
+        const d = maps['doctors'];
+        const dSpec = pick(d, ['تخصص', 'specialty']);
+        if (dSpec.length) setDoctorSpecialtyOptions(dSpec);
+        const j = maps['jobs'];
+        const jCat = pick(j, ['category', 'فئة', 'مجال', 'قسم']);
+        const jSpec = pick(j, ['specialty', 'تخصص']);
+        if (jCat.length) setJobCategoryOptions(jCat);
+        if (jSpec.length) setJobSpecialtyOptions(jSpec);
+        setPARTS_MAIN_SUBS(buildMainSubs(maps['spare-parts'], ['قطعة', 'part', 'نوع', 'رئيس', 'main', 'category', 'قسم'], ['compatible', 'متوافق', 'موديل', 'model', 'فرعي', 'sub', 'brand', 'ماركة']));
+        setANIMALS_MAIN_SUBS(buildMainSubs(maps['animals'], ['نوع', 'animal', 'حيوان', 'طيور', 'category'], ['سلالة', 'breed', 'sub', 'فرعي']));
+        setFOOD_MAIN_SUBS(buildMainSubs(maps['food-products'], ['نوع', 'food', 'منتج', 'category'], ['sub', 'فرعي', 'فئة', 'تصنيف']));
+        setRESTAURANTS_MAIN_SUBS(buildMainSubs(maps['restaurants'], ['مطبخ', 'cuisine', 'نوع', 'category'], ['sub', 'فرعي', 'قائمة', 'menu']));
+        setSTORES_MAIN_SUBS(buildMainSubs(maps['stores'], ['نوع المتجر', 'store', 'نوع', 'category'], ['sub', 'فرعي']));
+        setGROCERIES_MAIN_SUBS(buildMainSubs(maps['groceries'], ['نوع', 'category', 'منتج'], ['sub', 'فرعي']));
+        setHOME_SERVICES_MAIN_SUBS(buildMainSubs(maps['home-services'], ['نوع الخدمة', 'service', 'نوع', 'category'], ['sub', 'فرعي']));
+        setFURNITURE_MAIN_SUBS(buildMainSubs(maps['furniture'], ['نوع الأثاث', 'furniture', 'نوع', 'category'], ['sub', 'فرعي', 'مادة', 'material']));
+        setHOUSEHOLD_TOOLS_MAIN_SUBS(buildMainSubs(maps['home-tools'], ['نوع الأداة', 'tool', 'نوع', 'category'], ['sub', 'فرعي']));
+        setHOME_APPLIANCES_MAIN_SUBS(buildMainSubs(maps['home-appliances'], ['نوع الجهاز', 'appliance', 'نوع', 'category'], ['sub', 'فرعي', 'موديل', 'model']));
+        setELECTRONICS_MAIN_SUBS(buildMainSubs(maps['electronics'], ['نوع الجهاز', 'device', 'نوع', 'category'], ['sub', 'فرعي', 'موديل', 'model']));
+        setHEALTH_MAIN_SUBS(buildMainSubs(maps['health'], ['نوع الخدمة', 'خدمة', 'category'], ['sub', 'فرعي', 'تخصص', 'specialty']));
+        setEDUCATION_MAIN_SUBS(buildMainSubs(maps['education'], ['مرحلة', 'المرحلة', 'education', 'category'], ['مادة', 'subject', 'sub', 'فرعي']));
+        setSHIPPING_MAIN_SUBS(buildMainSubs(maps['shipping'], ['نوع الشحن', 'shipping', 'نوع', 'category'], ['sub', 'فرعي']));
+        setMENS_CLOTHING_SHOES_MAIN_SUBS(buildMainSubs(maps['mens-clothes'], ['نوع المنتج', 'ملابس', 'category'], ['sub', 'فرعي', 'مقاس', 'size']));
+        setWATCHES_JEWELRY_MAIN_SUBS(buildMainSubs(maps['watches-jewelry'], ['نوع المنتج', 'ساعات', 'مجوهرات', 'category'], ['sub', 'فرعي']));
+        setFREELANCE_SERVICES_MAIN_SUBS(buildMainSubs(maps['free-professions'], ['نوع المهنة', 'مهن', 'category'], ['sub', 'فرعي']));
+        setCAR_SERVICES_MAIN_SUBS(buildMainSubs(maps['car-services'], ['نوع الخدمة', 'service', 'نوع', 'category'], ['sub', 'فرعي', 'سيارة', 'car']));
+        setGENERAL_MAINTENANCE_MAIN_SUBS(buildMainSubs(maps['maintenance'], ['نوع الصيانة', 'maintenance', 'نوع', 'category'], ['sub', 'فرعي']));
+        setCONSTRUCTION_TOOLS_MAIN_SUBS(buildMainSubs(maps['construction'], ['أدوات', 'construction', 'نوع', 'category'], ['sub', 'فرعي']));
+        setGYMS_MAIN_SUBS(buildMainSubs(maps['gym'], ['نوع العضوية', 'gym', 'نوع', 'category'], ['sub', 'فرعي']));
+        setBIKES_LIGHT_VEHICLES_MAIN_SUBS(buildMainSubs(maps['light-vehicles'], ['نوع المركبة', 'vehicle', 'نوع', 'category'], ['sub', 'فرعي']));
+        setMATERIALS_PRODUCTION_LINES_MAIN_SUBS(buildMainSubs(maps['production-lines'], ['خط', 'line', 'مادة', 'material', 'category'], ['sub', 'فرعي']));
+        setFARMS_FACTORIES_PRODUCTS_MAIN_SUBS(buildMainSubs(maps['farm-products'], ['نوع المنتج', 'product', 'category'], ['sub', 'فرعي']));
+        setLIGHTING_DECOR_MAIN_SUBS(buildMainSubs(maps['lighting-decor'], ['نوع المنتج', 'إضاءة', 'ديكور', 'category'], ['sub', 'فرعي']));
+        setMISSING_MAIN_SUBS(buildMainSubs(maps['missing'], ['نوع المفقود', 'missing', 'category'], ['sub', 'فرعي', 'تاريخ', 'date']));
+        setTOOLS_SUPPLIES_MAIN_SUBS(buildMainSubs(maps['tools'], ['نوع العدة', 'tools', 'نوع', 'category'], ['sub', 'فرعي']));
+        setWHOLESALE_MAIN_SUBS(buildMainSubs(maps['wholesale'], ['نوع المنتج', 'wholesale', 'category'], ['sub', 'فرعي']));
+        setHEAVY_EQUIPMENT_MAIN_SUBS(buildMainSubs(maps['heavy-transport'], ['نوع المعدة', 'equipment', 'نوع', 'category'], ['sub', 'فرعي']));
+        const parts = maps['spare-parts'];
+        const brands = pick(parts, ['ماركة', 'brand', 'الشركة']);
+        const models = pick(parts, ['موديل', 'model', 'طراز', 'type']);
+        if (brands.length && models.length) setPARTS_BRANDS_MODELS(Object.fromEntries(brands.map(b => [b, models])));
       })
       .catch(() => {});
   }, []);
@@ -135,12 +238,11 @@ export default function CategoriesPage() {
   const [newRentalModelsBulk, setNewRentalModelsBulk] = useState('');
   const [rentalYear, setRentalYear] = useState('');
   const [newRentalYear, setNewRentalYear] = useState('');
-  const DRIVER_OPTIONS = ['بدون سائق', 'مع سائق'];
-  const [driverOptions, setDriverOptions] = useState<string[]>(DRIVER_OPTIONS);
+  const [driverOptions, setDriverOptions] = useState<string[]>([]);
   const [driver, setDriver] = useState('');
   const [newDriverVal, setNewDriverVal] = useState('');
-  const PROPERTY_TYPES = ['شقة', 'فيلا', 'أرض', 'محل', 'مكتب', 'ستوديو'];
-  const CONTRACT_TYPES = ['بيع', 'إيجار', 'تمليك', 'تمويل'];
+  const PROPERTY_TYPES: string[] = [];
+  const CONTRACT_TYPES: string[] = [];
   const [propertyType, setPropertyType] = useState('');
   const [contractType, setContractType] = useState('');
   const [propertyTypeOptions, setPropertyTypeOptions] = useState<string[]>(PROPERTY_TYPES);
@@ -162,10 +264,10 @@ export default function CategoriesPage() {
   const [selectedAnimalSub, setSelectedAnimalSub] = useState('');
   const [newAnimalMain, setNewAnimalMain] = useState('');
   const [newAnimalSubsBulk, setNewAnimalSubsBulk] = useState('');
-  const TEACHER_SPECIALTIES = ['رياضيات', 'علوم', 'لغة عربية', 'لغة إنجليزية', 'دراسات'];
-  const DOCTOR_SPECIALTIES = ['باطنة', 'جراحة', 'أسنان', 'أطفال', 'عيون'];
-  const JOB_CATEGORIES = ['إدارية', 'تقنية', 'مبيعات', 'مالية', 'تعليم'];
-  const JOB_SPECIALTIES = ['محاسب', 'مبرمج', 'مندوب مبيعات', 'معلم', 'مصمم'];
+  const TEACHER_SPECIALTIES: string[] = [];
+  const DOCTOR_SPECIALTIES: string[] = [];
+  const JOB_CATEGORIES: string[] = [];
+  const JOB_SPECIALTIES: string[] = [];
   const [teacherSpecialty, setTeacherSpecialty] = useState('');
   const [teacherSpecialtyOptions, setTeacherSpecialtyOptions] = useState<string[]>(TEACHER_SPECIALTIES);
   const [newTeacherSpecialtyVal, setNewTeacherSpecialtyVal] = useState('');
@@ -330,32 +432,299 @@ export default function CategoriesPage() {
   });
 
   const [GOVERNORATES_MAP, setGOVERNORATES_MAP] = useState<Record<string, string[]>>({});
+  const [GOVERNORATE_IDS, setGOVERNORATE_IDS] = useState<Record<string, number>>({});
+
+  const saveCitiesCacheById = (govId: number, names: string[]) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:govCities');
+      const obj: Record<number, string[]> = raw ? JSON.parse(raw) : {};
+      const prev = Array.isArray(obj[govId]) ? obj[govId] : [];
+      obj[govId] = Array.from(new Set([...prev, ...names]));
+      localStorage.setItem('admin:govCities', JSON.stringify(obj));
+    } catch {}
+  };
+
+  const saveCitiesCacheByName = (govName: string, names: string[]) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:govCitiesByName');
+      const obj: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+      const prev = Array.isArray(obj[govName]) ? obj[govName] : [];
+      obj[govName] = Array.from(new Set([...prev, ...names]));
+      localStorage.setItem('admin:govCitiesByName', JSON.stringify(obj));
+    } catch {}
+  };
+  const saveCityIdCache = (govId: number, cityName: string, cityId: number) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityIds');
+      const obj: Record<number, Record<string, number>> = raw ? JSON.parse(raw) : {};
+      const prev = obj[govId] ?? {};
+      prev[cityName] = cityId;
+      obj[govId] = prev;
+      localStorage.setItem('admin:cityIds', JSON.stringify(obj));
+    } catch {}
+  };
+  const renameCityIdCache = (govId: number, oldName: string, newName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityIds');
+      const obj: Record<number, Record<string, number>> = raw ? JSON.parse(raw) : {};
+      const prev = obj[govId] ?? {};
+      const id = prev[oldName];
+      delete prev[oldName];
+      if (typeof id === 'number') prev[newName] = id;
+      obj[govId] = prev;
+      localStorage.setItem('admin:cityIds', JSON.stringify(obj));
+    } catch {}
+  };
+  const deleteCityIdCache = (govId: number, cityName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityIds');
+      const obj: Record<number, Record<string, number>> = raw ? JSON.parse(raw) : {};
+      const prev = obj[govId] ?? {};
+      delete prev[cityName];
+      obj[govId] = prev;
+      localStorage.setItem('admin:cityIds', JSON.stringify(obj));
+    } catch {}
+  };
+  const saveCityRenameById = (govId: number, oldName: string, newName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityRenamesById');
+      const obj: Record<number, Record<string, string>> = raw ? JSON.parse(raw) : {};
+      const prev = obj[govId] ?? {};
+      prev[oldName] = newName;
+      obj[govId] = prev;
+      localStorage.setItem('admin:cityRenamesById', JSON.stringify(obj));
+    } catch {}
+  };
+  const saveCityRenameByName = (govName: string, oldName: string, newName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityRenamesByName');
+      const obj: Record<string, Record<string, string>> = raw ? JSON.parse(raw) : {};
+      const prev = obj[govName] ?? {};
+      prev[oldName] = newName;
+      obj[govName] = prev;
+      localStorage.setItem('admin:cityRenamesByName', JSON.stringify(obj));
+    } catch {}
+  };
+  const saveCityDeletedById = (govId: number, cityName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityDeletedById');
+      const obj: Record<number, string[]> = raw ? JSON.parse(raw) : {};
+      const prev = Array.isArray(obj[govId]) ? obj[govId] : [];
+      obj[govId] = Array.from(new Set([...prev, cityName]));
+      localStorage.setItem('admin:cityDeletedById', JSON.stringify(obj));
+    } catch {}
+  };
+  const saveCityDeletedByName = (govName: string, cityName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityDeletedByName');
+      const obj: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+      const prev = Array.isArray(obj[govName]) ? obj[govName] : [];
+      obj[govName] = Array.from(new Set([...prev, cityName]));
+      localStorage.setItem('admin:cityDeletedByName', JSON.stringify(obj));
+    } catch {}
+  };
+  const clearCityDeletedById = (govId: number, cityName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityDeletedById');
+      const obj: Record<number, string[]> = raw ? JSON.parse(raw) : {};
+      const prev = Array.isArray(obj[govId]) ? obj[govId] : [];
+      obj[govId] = prev.filter(x => x !== cityName);
+      localStorage.setItem('admin:cityDeletedById', JSON.stringify(obj));
+    } catch {}
+  };
+  const clearCityDeletedByName = (govName: string, cityName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:cityDeletedByName');
+      const obj: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+      const prev = Array.isArray(obj[govName]) ? obj[govName] : [];
+      obj[govName] = prev.filter(x => x !== cityName);
+      localStorage.setItem('admin:cityDeletedByName', JSON.stringify(obj));
+    } catch {}
+  };
+  const getCityId = (govName: string, cityName: string): number | undefined => {
+    try {
+      const govId = GOVERNORATE_IDS[govName];
+      if (typeof govId !== 'number') return undefined;
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('admin:cityIds') : null;
+      const obj: Record<number, Record<string, number>> = raw ? JSON.parse(raw) : {};
+      const id = obj[govId]?.[cityName];
+      return typeof id === 'number' ? id : undefined;
+    } catch { return undefined; }
+  };
+  const resolveCityId = async (govName: string, cityName: string): Promise<number | undefined> => {
+    const existing = getCityId(govName, cityName);
+    if (typeof existing === 'number') return existing;
+    const govId = GOVERNORATE_IDS[govName];
+    if (typeof govId !== 'number') return undefined;
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      await fetchGovernorateById(govId, token);
+      const next = getCityId(govName, cityName);
+      return typeof next === 'number' ? next : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const saveGovernorateRename = (oldName: string, newName: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem('admin:govRenames');
+      const obj: Record<string, string> = raw ? JSON.parse(raw) : {};
+      obj[oldName] = newName;
+      localStorage.setItem('admin:govRenames', JSON.stringify(obj));
+    } catch {}
+  };
   const cities = selectedGovernorate ? GOVERNORATES_MAP[selectedGovernorate] ?? [] : [];
-  const renameGovernorate = (prevName: string, nextRaw: string) => {
+  const renameGovernorate = async (prevName: string, nextRaw: string) => {
     const next = nextRaw.trim();
     if (!next || prevName === next) return;
-    setGOVERNORATES_MAP(prev => {
-      if (prev[next]) return prev;
-      const n = { ...prev };
-      const list = n[prevName] ?? [];
-      delete n[prevName];
-      n[next] = list;
-      return n;
-    });
-    if (selectedGovernorate === prevName) setSelectedGovernorate(next);
-    showToast('تم تعديل المحافظة', 'success');
+    if (GOVERNORATES_MAP[next]) { showToast('الاسم موجود مسبقًا في نفس القائمة', 'warning'); return; }
+    const govId = GOVERNORATE_IDS[prevName];
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      if (typeof govId === 'number') {
+        const g = await updateGovernorate(govId, next, token);
+        setGOVERNORATES_MAP(prev => {
+          const n = { ...prev };
+          const prevList = n[prevName] ?? [];
+          const merged = Array.from(new Set([...(Array.isArray(g.cities) ? g.cities : []), ...prevList]));
+          delete n[prevName];
+          n[g.name] = merged;
+          return n;
+        });
+        setGOVERNORATE_IDS(prev => {
+          const n = { ...prev };
+          delete n[prevName];
+          if (typeof g.id === 'number') n[g.name] = g.id!; else n[g.name] = govId;
+          return n;
+        });
+        try {
+          if (typeof window !== 'undefined') {
+            const raw = localStorage.getItem('admin:govCitiesByName');
+            const obj: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+            const list = Array.isArray(obj[prevName]) ? obj[prevName] : [];
+            delete obj[prevName];
+            if (list.length) obj[g.name] = Array.from(new Set([...(obj[g.name] ?? []), ...list]));
+            localStorage.setItem('admin:govCitiesByName', JSON.stringify(obj));
+          }
+        } catch {}
+        saveGovernorateRename(prevName, g.name);
+        if (selectedGovernorate === prevName) setSelectedGovernorate(g.name);
+        showToast('تم تعديل المحافظة', 'success');
+      } else {
+        setGOVERNORATES_MAP(prev => {
+          const n = { ...prev };
+          const list = n[prevName] ?? [];
+          delete n[prevName];
+          n[next] = list;
+          return n;
+        });
+        setGOVERNORATE_IDS(prev => {
+          const n = { ...prev };
+          const id = n[prevName];
+          delete n[prevName];
+          if (typeof id === 'number') n[next] = id;
+          return n;
+        });
+        try {
+          if (typeof window !== 'undefined') {
+            const raw = localStorage.getItem('admin:govCitiesByName');
+            const obj: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+            const list = Array.isArray(obj[prevName]) ? obj[prevName] : [];
+            delete obj[prevName];
+            if (list.length) obj[next] = Array.from(new Set([...(obj[next] ?? []), ...list]));
+            localStorage.setItem('admin:govCitiesByName', JSON.stringify(obj));
+          }
+        } catch {}
+        saveGovernorateRename(prevName, next);
+        if (selectedGovernorate === prevName) setSelectedGovernorate(next);
+        showToast('تم تعديل المحافظة', 'success');
+      }
+    } catch (e) {
+      let msg = e instanceof Error ? e.message : 'تعذر تعديل المحافظة';
+      const low = String(msg).toLowerCase();
+      if (low.includes('undefined method') && low.includes('governoratecontroller::update')) {
+        msg = 'التعديل غير متاح حاليًا: لا توجد دالة update على السيرفر';
+      }
+      showToast(msg, 'error');
+    }
   };
-  const renameCity = (prevName: string, nextRaw: string) => {
+  const renameCity = async (prevName: string, nextRaw: string) => {
     const next = nextRaw.trim();
     if (!next || prevName === next || !selectedGovernorate) return;
-    setGOVERNORATES_MAP(prev => {
-      const list = prev[selectedGovernorate] ?? [];
-      if (list.includes(next)) return prev;
-      const updated = list.map(x => (x === prevName ? next : x));
-      return { ...prev, [selectedGovernorate]: updated };
-    });
-    if (selectedCity === prevName) setSelectedCity(next);
-    showToast('تم تعديل المدينة', 'success');
+    let cityId = getCityId(selectedGovernorate, prevName);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      if (typeof cityId === 'number') {
+        const c = await updateCity(cityId, next, token);
+        setGOVERNORATES_MAP(prev => {
+          const list = prev[selectedGovernorate] ?? [];
+          if (list.includes(c.name)) return prev;
+          const updated = list.map(x => (x === prevName ? c.name : x));
+          return { ...prev, [selectedGovernorate]: updated };
+        });
+        const govId = GOVERNORATE_IDS[selectedGovernorate];
+        if (typeof govId === 'number' && typeof c.id === 'number') renameCityIdCache(govId, prevName, c.name);
+        if (typeof govId === 'number') saveCityRenameById(govId, prevName, c.name);
+        saveCityRenameByName(selectedGovernorate, prevName, c.name);
+        if (typeof govId === 'number') clearCityDeletedById(govId, c.name);
+        clearCityDeletedByName(selectedGovernorate, c.name);
+        if (selectedCity === prevName) setSelectedCity(c.name);
+        showToast('تم تعديل المدينة', 'success');
+      } else {
+        cityId = await resolveCityId(selectedGovernorate, prevName);
+        if (typeof cityId === 'number') {
+          const c = await updateCity(cityId, next, token);
+          setGOVERNORATES_MAP(prev => {
+            const list = prev[selectedGovernorate] ?? [];
+            if (list.includes(c.name)) return prev;
+            const updated = list.map(x => (x === prevName ? c.name : x));
+            return { ...prev, [selectedGovernorate]: updated };
+          });
+          const govId = GOVERNORATE_IDS[selectedGovernorate];
+          if (typeof govId === 'number' && typeof c.id === 'number') renameCityIdCache(govId, prevName, c.name);
+          if (typeof govId === 'number') saveCityRenameById(govId, prevName, c.name);
+          saveCityRenameByName(selectedGovernorate, prevName, c.name);
+          if (typeof govId === 'number') clearCityDeletedById(govId, c.name);
+          clearCityDeletedByName(selectedGovernorate, c.name);
+          if (selectedCity === prevName) setSelectedCity(c.name);
+          showToast('تم تعديل المدينة', 'success');
+        } else {
+          setGOVERNORATES_MAP(prev => {
+            const list = prev[selectedGovernorate] ?? [];
+            if (list.includes(next)) return prev;
+            const updated = list.map(x => (x === prevName ? next : x));
+            return { ...prev, [selectedGovernorate]: updated };
+          });
+          const govId = GOVERNORATE_IDS[selectedGovernorate];
+          if (typeof govId === 'number') renameCityIdCache(govId, prevName, next);
+          if (typeof govId === 'number') saveCityRenameById(govId, prevName, next);
+          saveCityRenameByName(selectedGovernorate, prevName, next);
+          if (typeof govId === 'number') clearCityDeletedById(govId, next);
+          clearCityDeletedByName(selectedGovernorate, next);
+          if (selectedCity === prevName) setSelectedCity(next);
+          showToast('تم تعديل المدينة', 'info');
+        }
+      }
+    } catch (e) {
+      let msg = e instanceof Error ? e.message : 'تعذر تعديل المدينة';
+      const low = String(msg).toLowerCase();
+      if (low.includes('undefined method') && low.includes('cities::update')) {
+        msg = 'التعديل غير متاح حاليًا: لا توجد دالة update للمدينة على السيرفر';
+      }
+      showToast(msg, 'error');
+    }
   };
   const [newGovernorate, setNewGovernorate] = useState('');
   const [newCity, setNewCity] = useState('');
@@ -364,33 +733,109 @@ export default function CategoriesPage() {
     let mounted = true;
     (async () => {
       try {
+        const cachedIds = typeof window !== 'undefined' ? localStorage.getItem('admin:governorateIds') : null;
+        if (cachedIds) { try { setGOVERNORATE_IDS(JSON.parse(cachedIds as string)); } catch {} }
         const items = await fetchGovernorates();
         if (!mounted) return;
-        const map = Object.fromEntries(items.map(g => [g.name, g.cities]));
+        const map: Record<string, string[]> = {};
+        const idMap: Record<string, number> = {};
+        for (const g of items) {
+          const name = g.name;
+          const cities = Array.isArray(g.cities) ? g.cities : [];
+          if (!name) continue;
+          map[name] = Array.from(new Set([...(map[name] ?? []), ...cities]));
+          if (typeof g.id === 'number') idMap[name] = g.id;
+        }
+        // merge cached cities
+        try {
+          const cachedByIdRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:govCities') : null;
+          const cachedByNameRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:govCitiesByName') : null;
+          const cachedById: Record<number, string[]> = cachedByIdRaw ? JSON.parse(cachedByIdRaw) : {};
+          const cachedByName: Record<string, string[]> = cachedByNameRaw ? JSON.parse(cachedByNameRaw) : {};
+          for (const [name, id] of Object.entries(idMap)) {
+            const extra = Array.isArray(cachedById[id]) ? cachedById[id] : [];
+            if (extra.length) map[name] = Array.from(new Set([...(map[name] ?? []), ...extra]));
+          }
+          for (const [name, extra] of Object.entries(cachedByName)) {
+            if (extra && extra.length) map[name] = Array.from(new Set([...(map[name] ?? []), ...extra]));
+          }
+          const renRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:govRenames') : null;
+          const renames: Record<string, string> = renRaw ? JSON.parse(renRaw) : {};
+          for (const [oldName, newName] of Object.entries(renames)) {
+            if (!oldName || !newName || oldName === newName) continue;
+            const oldList = map[oldName] ?? [];
+            const newList = map[newName] ?? [];
+            if (oldList.length || newList.length) {
+              map[newName] = Array.from(new Set([...newList, ...oldList]));
+              delete map[oldName];
+            }
+            if (typeof idMap[oldName] === 'number') {
+              if (typeof idMap[newName] !== 'number') idMap[newName] = idMap[oldName];
+              delete idMap[oldName];
+            }
+          }
+          const cityRenByIdRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:cityRenamesById') : null;
+          const cityRenByNameRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:cityRenamesByName') : null;
+          const cityDelByIdRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:cityDeletedById') : null;
+          const cityDelByNameRaw = typeof window !== 'undefined' ? localStorage.getItem('admin:cityDeletedByName') : null;
+          const cityRenById: Record<number, Record<string, string>> = cityRenByIdRaw ? JSON.parse(cityRenByIdRaw) : {};
+          const cityRenByName: Record<string, Record<string, string>> = cityRenByNameRaw ? JSON.parse(cityRenByNameRaw) : {};
+          const cityDelById: Record<number, string[]> = cityDelByIdRaw ? JSON.parse(cityDelByIdRaw) : {};
+          const cityDelByName: Record<string, string[]> = cityDelByNameRaw ? JSON.parse(cityDelByNameRaw) : {};
+          for (const [oldName, newName] of Object.entries(renames)) {
+            if (!oldName || !newName || oldName === newName) continue;
+            const renOld = cityRenByName[oldName] ?? {};
+            const renNew = cityRenByName[newName] ?? {};
+            if (Object.keys(renOld).length) {
+              cityRenByName[newName] = { ...renNew, ...renOld };
+              delete cityRenByName[oldName];
+            }
+            const delOld = cityDelByName[oldName] ?? [];
+            const delNew = cityDelByName[newName] ?? [];
+            if (Array.isArray(delOld) && delOld.length) {
+              cityDelByName[newName] = Array.from(new Set([...(Array.isArray(delNew) ? delNew : []), ...delOld]));
+              delete cityDelByName[oldName];
+            }
+          }
+          for (const [gname, gid] of Object.entries(idMap)) {
+            const list = map[gname] ?? [];
+            const renMap = cityRenById[gid] ?? {};
+            const delList = Array.isArray(cityDelById[gid]) ? cityDelById[gid] : [];
+            const renamed = list.map(x => (renMap[x] ? renMap[x] : x));
+            const filtered = renamed.filter(x => !delList.includes(x));
+            map[gname] = Array.from(new Set(filtered));
+          }
+          for (const [gname, renMap] of Object.entries(cityRenByName)) {
+            const list = map[gname] ?? [];
+            const renamed = list.map(x => (renMap[x] ? renMap[x] : x));
+            map[gname] = Array.from(new Set(renamed));
+          }
+          for (const [gname, delList] of Object.entries(cityDelByName)) {
+            const list = map[gname] ?? [];
+            const filtered = list.filter(x => !(Array.isArray(delList) && delList.includes(x)));
+            map[gname] = Array.from(new Set(filtered));
+          }
+        } catch {}
         setGOVERNORATES_MAP(map);
+        setGOVERNORATE_IDS(idMap);
       } catch {}
     })();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') localStorage.setItem('admin:governorateIds', JSON.stringify(GOVERNORATE_IDS));
+    } catch {}
+  }, [GOVERNORATE_IDS]);
   const addGovernorate = async () => {
     const name = newGovernorate.trim();
     if (!name) return;
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
-      const items = await postAdminGovernorates({ name, cities: [] }, token);
-      setGOVERNORATES_MAP(prev => {
-        const n = { ...prev };
-        if (Array.isArray(items) && items.length > 0) {
-          for (const g of items) {
-            const govName = g.name;
-            const cities = Array.isArray(g.cities) ? g.cities : [];
-            if (govName) n[govName] = cities;
-          }
-        } else {
-          if (!n[name]) n[name] = [];
-        }
-        return n;
-      });
+      const g = await createGovernorate(name, token);
+      setGOVERNORATES_MAP(prev => ({ ...prev, [g.name]: Array.isArray(g.cities) ? g.cities : [] }));
+      if (typeof g.id === 'number') setGOVERNORATE_IDS(prev => ({ ...prev, [g.name]: g.id! }));
     } catch {
       setGOVERNORATES_MAP(prev => {
         if (prev[name]) return prev;
@@ -401,28 +846,93 @@ export default function CategoriesPage() {
     setSelectedCity('');
     setNewGovernorate('');
   };
-  const removeGovernorate = (name: string) => {
-    const linked = (GOVERNORATES_MAP[name] ?? []).length > 0;
-    if (linked) { showToast('مرتبط بداتا إعلان، يمكنك التعديل بدلًا من الحذف', 'warning'); return; }
-    setGOVERNORATES_MAP(prev => {
-      const n = { ...prev };
-      delete n[name];
-      return n;
-    });
-    if (selectedGovernorate === name) {
-      setSelectedGovernorate('');
-      setSelectedCity('');
+  const removeGovernorate = async (name: string) => {
+    const govId = GOVERNORATE_IDS[name];
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      if (typeof govId === 'number') {
+        await deleteGovernorate(govId, token);
+      }
+      setGOVERNORATES_MAP(prev => {
+        const n = { ...prev };
+        delete n[name];
+        return n;
+      });
+      setGOVERNORATE_IDS(prev => {
+        const n = { ...prev };
+        delete n[name];
+        return n;
+      });
+      try {
+        if (typeof window !== 'undefined') {
+          const byNameRaw = localStorage.getItem('admin:govCitiesByName');
+          const byIdRaw = localStorage.getItem('admin:govCities');
+          if (byNameRaw) {
+            const obj: Record<string, string[]> = JSON.parse(byNameRaw);
+            delete obj[name];
+            localStorage.setItem('admin:govCitiesByName', JSON.stringify(obj));
+          }
+          if (byIdRaw && typeof govId === 'number') {
+            const objId: Record<number, string[]> = JSON.parse(byIdRaw);
+            delete objId[govId];
+            localStorage.setItem('admin:govCities', JSON.stringify(objId));
+          }
+        }
+      } catch {}
+      if (selectedGovernorate === name) {
+        setSelectedGovernorate('');
+        setSelectedCity('');
+      }
+      showToast('تم حذف المحافظة', 'info');
+    } catch (e) {
+      let msg = e instanceof Error ? e.message : 'لا يمكن حذف المحافظة لأنها مرتبطة بإعلان';
+      const low = String(msg).toLowerCase();
+      if (low.includes('undefined method') && low.includes('governoratecontroller::destroy')) {
+        msg = 'الحذف غير متاح حاليًا: لا توجد دالة destroy على السيرفر';
+      }
+      showToast(msg, 'warning');
     }
-    showToast('تم حذف المحافظة', 'info');
   };
-  const addCity = () => {
+  const addCity = async () => {
     const name = newCity.trim();
     if (!name || !selectedGovernorate) return;
-    setGOVERNORATES_MAP(prev => {
-      const list = prev[selectedGovernorate] ?? [];
-      if (list.includes(name)) return prev;
-      return { ...prev, [selectedGovernorate]: [...list, name] };
-    });
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      const govId = GOVERNORATE_IDS[selectedGovernorate];
+      if (typeof govId === 'number') {
+        const city = await createCity(govId, name, token);
+        setGOVERNORATES_MAP(prev => {
+          const list = prev[selectedGovernorate] ?? [];
+          if (list.includes(city.name)) return prev;
+          return { ...prev, [selectedGovernorate]: [...list, city.name] };
+        });
+        saveCitiesCacheById(govId, [city.name]);
+        saveCitiesCacheByName(selectedGovernorate, [city.name]);
+        if (typeof city.id === 'number') saveCityIdCache(govId, city.name, city.id);
+        clearCityDeletedById(govId, city.name);
+        clearCityDeletedByName(selectedGovernorate, city.name);
+      } else {
+        setGOVERNORATES_MAP(prev => {
+          const list = prev[selectedGovernorate] ?? [];
+          if (list.includes(name)) return prev;
+          return { ...prev, [selectedGovernorate]: [...list, name] };
+        });
+        saveCitiesCacheByName(selectedGovernorate, [name]);
+        clearCityDeletedByName(selectedGovernorate, name);
+      }
+    } catch {
+      setGOVERNORATES_MAP(prev => {
+        const list = prev[selectedGovernorate] ?? [];
+        if (list.includes(name)) return prev;
+        return { ...prev, [selectedGovernorate]: [...list, name] };
+      });
+      const govId = GOVERNORATE_IDS[selectedGovernorate];
+      if (typeof govId === 'number') saveCitiesCacheById(govId, [name]);
+      saveCitiesCacheByName(selectedGovernorate, [name]);
+      const govId2 = GOVERNORATE_IDS[selectedGovernorate];
+      if (typeof govId2 === 'number') clearCityDeletedById(govId2, name);
+      clearCityDeletedByName(selectedGovernorate, name);
+    }
     setNewCity('');
   };
   const addCitiesBulk = async () => {
@@ -431,41 +941,91 @@ export default function CategoriesPage() {
     if (tokens.length === 0) return;
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
-      const items = await postAdminGovernorates({ name: selectedGovernorate, cities: tokens }, token);
-      setGOVERNORATES_MAP(prev => {
-        const n = { ...prev };
-        if (Array.isArray(items) && items.length > 0) {
-          for (const g of items) {
-            const govName = g.name;
-            const cities = Array.isArray(g.cities) ? g.cities : [];
-            if (govName) n[govName] = cities;
+      const govId = GOVERNORATE_IDS[selectedGovernorate];
+      if (typeof govId === 'number') {
+        const added: string[] = [];
+        for (const cityName of tokens) {
+          try {
+            const c = await createCity(govId, cityName, token);
+            if (c?.name) added.push(c.name);
+            if (typeof c?.id === 'number') saveCityIdCache(govId, c.name, c.id!);
+          } catch {
+            added.push(cityName);
           }
-        } else {
-          const list = n[selectedGovernorate] ?? [];
-          const merged = Array.from(new Set([...list, ...tokens]));
-          n[selectedGovernorate] = merged;
         }
-        return n;
-      });
+        setGOVERNORATES_MAP(prev => {
+          const list = prev[selectedGovernorate] ?? [];
+          const merged = Array.from(new Set([...list, ...added]));
+          return { ...prev, [selectedGovernorate]: merged };
+        });
+        saveCitiesCacheById(govId, added);
+        saveCitiesCacheByName(selectedGovernorate, added);
+        for (const cityName of added) {
+          clearCityDeletedById(govId, cityName);
+          clearCityDeletedByName(selectedGovernorate, cityName);
+        }
+      } else {
+        setGOVERNORATES_MAP(prev => {
+          const list = prev[selectedGovernorate] ?? [];
+          const merged = Array.from(new Set([...list, ...tokens]));
+          return { ...prev, [selectedGovernorate]: merged };
+        });
+        saveCitiesCacheByName(selectedGovernorate, tokens);
+        for (const cityName of tokens) {
+          clearCityDeletedByName(selectedGovernorate, cityName);
+        }
+      }
     } catch {
       setGOVERNORATES_MAP(prev => {
         const list = prev[selectedGovernorate] ?? [];
         const merged = Array.from(new Set([...list, ...tokens]));
         return { ...prev, [selectedGovernorate]: merged };
       });
+      const govId = GOVERNORATE_IDS[selectedGovernorate];
+      if (typeof govId === 'number') saveCitiesCacheById(govId, tokens);
+      saveCitiesCacheByName(selectedGovernorate, tokens);
+      const gid = GOVERNORATE_IDS[selectedGovernorate];
+      for (const cityName of tokens) {
+        if (typeof gid === 'number') clearCityDeletedById(gid, cityName);
+        clearCityDeletedByName(selectedGovernorate, cityName);
+      }
     }
     setNewCitiesBulk('');
   };
-  const removeCity = (name: string) => {
+  const removeCity = async (name: string) => {
     if (!selectedGovernorate) return;
     const linked = selectedCity === name;
     if (linked) { showToast('مرتبط بداتا إعلان، يمكنك التعديل بدلًا من الحذف', 'warning'); return; }
-    setGOVERNORATES_MAP(prev => {
-      const list = prev[selectedGovernorate] ?? [];
-      return { ...prev, [selectedGovernorate]: list.filter(x => x !== name) };
-    });
-    if (selectedCity === name) setSelectedCity('');
-    showToast('تم حذف المدينة', 'info');
+    let cityId = getCityId(selectedGovernorate, name);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      if (typeof cityId === 'number') {
+        await deleteCity(cityId, token);
+      }
+      else {
+        cityId = await resolveCityId(selectedGovernorate, name);
+        if (typeof cityId === 'number') {
+          await deleteCity(cityId, token);
+        }
+      }
+      setGOVERNORATES_MAP(prev => {
+        const list = prev[selectedGovernorate] ?? [];
+        return { ...prev, [selectedGovernorate]: list.filter(x => x !== name) };
+      });
+      const govId = GOVERNORATE_IDS[selectedGovernorate];
+      if (typeof govId === 'number') deleteCityIdCache(govId, name);
+      if (typeof govId === 'number') saveCityDeletedById(govId, name);
+      saveCityDeletedByName(selectedGovernorate, name);
+      if (selectedCity === name) setSelectedCity('');
+      showToast('تم حذف المدينة', 'info');
+    } catch (e) {
+      let msg = e instanceof Error ? e.message : 'تعذر حذف المدينة';
+      const low = String(msg).toLowerCase();
+      if (low.includes('undefined method') && low.includes('cities::destroy')) {
+        msg = 'الحذف غير متاح حاليًا: لا توجد دالة destroy للمدينة على السيرفر';
+      }
+      showToast(msg, 'warning');
+    }
   };
   const models = selectedBrand ? BRANDS_MODELS[selectedBrand] ?? [] : [];
   const rentalModels = selectedRentalBrand ? RENTAL_BRANDS_MODELS[selectedRentalBrand] ?? [] : [];
@@ -507,7 +1067,7 @@ export default function CategoriesPage() {
   const [exteriorColorOptions, setExteriorColorOptions] = useState<string[]>([]);
   const [transmissionOptions, setTransmissionOptions] = useState<string[]>([]);
   const [fuelOptions, setFuelOptions] = useState<string[]>([]);
-  const [rentalYearOptions, setRentalYearOptions] = useState<string[]>(YEAR_OPTIONS);
+  const [rentalYearOptions, setRentalYearOptions] = useState<string[]>([]);
   const ManagedSelect = ({ options, value, onChange, onDelete, onEdit, disabled, placeholder }: { options: string[]; value: string; onChange: (v: string) => void; onDelete: (v: string) => void; onEdit?: (prev: string, next: string) => void; disabled?: boolean; placeholder?: string }) => {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement | null>(null);
@@ -760,6 +1320,20 @@ export default function CategoriesPage() {
     setSelectedAnimalMain(name);
     setNewAnimalMain('');
   };
+  const renameAnimalMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setANIMALS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedAnimalMain === prevName) setSelectedAnimalMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
   const removeAnimalMain = (name: string) => {
     setANIMALS_MAIN_SUBS(prev => {
       const n = { ...prev };
@@ -792,6 +1366,18 @@ export default function CategoriesPage() {
       return { ...prev, [selectedAnimalMain]: list.filter(x => x !== s) };
     });
     if (selectedAnimalSub === s) setSelectedAnimalSub('');
+  };
+  const renameAnimalSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedAnimalMain) return;
+    setANIMALS_MAIN_SUBS(prev => {
+      const list = prev[selectedAnimalMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedAnimalMain]: updated };
+    });
+    if (selectedAnimalSub === prevName) setSelectedAnimalSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addRentalBrand = () => {
@@ -2458,7 +3044,7 @@ export default function CategoriesPage() {
                 disabled={!selectedGovernorate}
                 placeholder={selectedGovernorate ? 'اختر المدينة' : 'اختر المحافظة أولًا'}
               />
-              {/* <div className="inline-actions">
+              <div className="inline-actions">
                 <input
                   type="text"
                   className="form-input"
@@ -2468,8 +3054,8 @@ export default function CategoriesPage() {
                   disabled={!selectedGovernorate}
                 />
                 <button className="btn-add" onClick={addCity} disabled={!selectedGovernorate}>إضافة</button>
-              </div> */}
-              <div className="inline-actions">
+              </div>
+              {/* <div className="inline-actions">
                 <textarea
                   className="form-input"
                   placeholder="أدخل المدن مفصولة بفواصل أو أسطر"
@@ -2479,7 +3065,7 @@ export default function CategoriesPage() {
                   rows={1}
                 />
                 <button className="btn-add" onClick={addCitiesBulk} disabled={!selectedGovernorate}>تسليم المدن</button>
-              </div>
+              </div> */}
             </div>
           </div>
           <div className="categories-grid">
@@ -4423,16 +5009,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(ANIMALS_MAIN_SUBS)}
                               value={selectedAnimalMain}
-                              onChange={(e) => { setSelectedAnimalMain(e.target.value); setSelectedAnimalSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(ANIMALS_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedAnimalMain(v); setSelectedAnimalSub(''); }}
+                              onDelete={(opt) => removeAnimalMain(opt)}
+                              onEdit={(prev, next) => renameAnimalMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -4442,24 +5026,19 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewAnimalMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addAnimalMain}>إضافة</button>
-                              {selectedAnimalMain && (
-                                <button className="btn-delete" onClick={() => removeAnimalMain(selectedAnimalMain)}>حذف الرئيسي</button>
-                              )}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={animalSubs}
                               value={selectedAnimalSub}
-                              onChange={(e) => setSelectedAnimalSub(e.target.value)}
+                              onChange={(v) => setSelectedAnimalSub(v)}
+                              onDelete={(opt) => removeAnimalSub(opt)}
+                              onEdit={(prev, next) => renameAnimalSub(prev, next)}
                               disabled={!selectedAnimalMain}
-                            >
-                              <option value="">{selectedAnimalMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {animalSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedAnimalMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"

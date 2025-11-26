@@ -107,7 +107,11 @@ export interface CategoriesResponse {
 export interface AssignUserPackagePayload {
   user_id: number;
   featured_ads: number;
-  days: number;
+  featured_days: number;
+  start_featured_now?: boolean;
+  standard_ads: number;
+  standard_days: number;
+  start_standard_now?: boolean;
 }
 
 export interface UserPackageData {
@@ -117,14 +121,21 @@ export interface UserPackageData {
   standard_ads: number;
   featured_ads_used: number;
   standard_ads_used: number;
+  featured_days: number;
+  featured_start_date: string | null;
+  featured_expire_date: string | null;
+  standard_days: number;
+  standard_start_date: string | null;
+  standard_expire_date: string | null;
   days: number;
-  start_date: string;
-  expire_date: string;
+  start_date: string | null;
+  expire_date: string | null;
   created_at: string;
   updated_at: string;
   featured_ads_remaining: number;
   standard_ads_remaining: number;
-  active: boolean;
+  featured_active: boolean;
+  standard_active: boolean;
 }
 
 export interface AssignUserPackageResponse {

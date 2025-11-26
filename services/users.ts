@@ -1,4 +1,4 @@
-import type { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse } from '@/models/users';
+import { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse } from '@/models/users';
 
 export async function fetchUsersSummary(token?: string): Promise<UsersSummaryResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
