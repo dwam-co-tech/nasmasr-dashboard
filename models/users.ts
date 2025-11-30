@@ -143,3 +143,21 @@ export interface AssignUserPackageResponse {
   message: string;
   data: UserPackageData;
 }
+
+export interface SetFeaturedPayload {
+  user_id: number;
+  category_ids: number[];
+}
+
+export interface SetFeaturedResponse {
+  success?: boolean;
+  message?: string;
+  data?: { id?: number; user_id?: number; category_ids?: number[] };
+  id?: number;
+  best_advertiser_id?: number;
+}
+
+export interface DisableFeaturedResponse {
+  success?: boolean;
+  message?: string;
+}

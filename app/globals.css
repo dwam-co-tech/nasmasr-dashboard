@@ -1433,6 +1433,8 @@ body {
   z-index: 1000;
   backdrop-filter: blur(5px);
   animation: fadeIn 0.3s ease;
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .modal-content {
@@ -4248,6 +4250,69 @@ html, body, .dashboard-layout, .content, .reports-page {
 .verify-modal .copy-icon:hover,
 .verify-modal .whatsapp-icon:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 .verify-modal .verify-helper { font-size: 0.9rem; color: var(--color-gray); margin-top: 10px; }
+
+.favorites-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 2px solid #e5e7eb;
+  box-shadow: var(--shadow-lg);
+  width: min(800px, 95vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.favorites-modal .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #fff;
+}
+.favorites-modal .modal-content { padding: 20px; flex: 1; overflow-y: auto; width: 100%; box-sizing: border-box; }
+.favorites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+.favorite-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+.favorite-label { font-weight: 700; color: #111827; }
+.favorites-modal .modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid #e5e7eb;
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+}
+.btn-favorites {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.btn-favorites:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
 .btn-verify-done {
   background: linear-gradient(135deg, #3bf699, #248342);
   color: white;

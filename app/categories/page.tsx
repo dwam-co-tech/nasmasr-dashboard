@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { fetchCarMakes, fetchCategoryFields, fetchCategoryFieldMaps, fetchGovernorates, postAdminGovernorates, createGovernorate, createCity, updateGovernorate, deleteGovernorate, updateCity, deleteCity, fetchGovernorateById } from '@/services/makes';
+import { fetchCarMakes, fetchCategoryFields, fetchCategoryFieldMaps, fetchCategoryMainSubsBatch, fetchGovernorates, postAdminGovernorates, createGovernorate, createCity, updateGovernorate, deleteGovernorate, updateCity, deleteCity, fetchGovernorateById, updateCategoryFieldOptions, fetchAdminMakesWithIds, postAdminMake, postAdminMakeModels } from '@/services/makes';
 
 interface Category {
   id: number;
@@ -72,17 +72,36 @@ export default function CategoriesPage() {
     setTimeout(() => { setToasts(prev => prev.filter(t => t.id !== id)); }, 3500);
   };
   const removeToast = (id: string) => { setToasts(prev => prev.filter(t => t.id !== id)); };
+  const updateOptionsWithToast = (
+    slug: string,
+    field: string | undefined,
+    options: string[],
+    success?: string
+  ) => {
+    const name = field?.trim();
+    if (!name) return Promise.resolve();
+    return updateCategoryFieldOptions(slug, name, options)
+      .then(() => { if (success) showToast(success, 'success'); })
+      .catch((err) => {
+        const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في تحديث البيانات';
+        showToast(msg, 'error');
+      });
+  };
   const [selectedGovernorate, setSelectedGovernorate] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [BRANDS_MODELS, setBRANDS_MODELS] = useState<Record<string, string[]>>({});
+  const [MAKE_IDS, setMAKE_IDS] = useState<Record<string, number>>({});
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [newBrand, setNewBrand] = useState('');
   const [newModelsBulk, setNewModelsBulk] = useState('');
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
-    fetchCarMakes(token)
-      .then((d) => {
+    Promise.all([
+      fetchCarMakes(token),
+      fetchAdminMakesWithIds(token).catch(() => []),
+    ])
+      .then(([d, adminList]) => {
         const map: Record<string, string[]> = {};
         for (const it of d.makes) {
           if (it && typeof it.name === 'string') {
@@ -90,12 +109,45 @@ export default function CategoriesPage() {
           }
         }
         setBRANDS_MODELS(map);
+        setRENTAL_BRANDS_MODELS(map);
+        setPARTS_BRANDS_MODELS(map);
+        const ids: Record<string, number> = {};
+        for (const it of adminList as { id: number; name: string }[]) {
+          if (it && typeof it.name === 'string' && typeof it.id === 'number') ids[it.name] = it.id;
+        }
+        setMAKE_IDS(ids);
       })
       .catch(() => {});
   }, []);
+
+  const ensureMakeId = async (name: string): Promise<number | null> => {
+    const n = String(name || '').trim();
+    if (!n) return null;
+    const existing = MAKE_IDS[n];
+    if (typeof existing === 'number') return existing;
+    try {
+      const created = await postAdminMake(n);
+      setMAKE_IDS(prev => ({ ...prev, [created.name]: created.id }));
+      return created.id;
+    } catch (err) {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+        const list = await fetchAdminMakesWithIds(token).catch(() => []);
+        const found = (list as { id: number; name: string }[]).find(it => String(it?.name || '').trim() === n);
+        if (found && typeof found.id === 'number') {
+          setMAKE_IDS(prev => ({ ...prev, [found.name]: found.id }));
+          return found.id;
+        }
+      } catch {}
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في الحصول على الماركة';
+      showToast(msg, 'error');
+      return null;
+    }
+  };
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
-    fetchCategoryFieldMaps([
+    Promise.all([
+      fetchCategoryFieldMaps([
       'cars',
       'cars_rent',
       'real_estate',
@@ -132,8 +184,41 @@ export default function CategoriesPage() {
       'tools',
       'home-appliances',
       'missing',
-    ], token)
-      .then((maps) => {
+    ], token),
+      fetchCategoryMainSubsBatch([
+        'spare-parts',
+        'animals',
+        'food-products',
+        'restaurants',
+        'stores',
+        'groceries',
+        'kids-toys',
+        'home-services',
+        'furniture',
+        'home-tools',
+        'home-appliances',
+        'electronics',
+        'health',
+        'education',
+        'shipping',
+        'mens-clothes',
+        'watches-jewelry',
+        'free-professions',
+        'car-services',
+        'maintenance',
+        'construction',
+        'gym',
+        'light-vehicles',
+        'production-lines',
+        'farm-products',
+        'lighting-decor',
+        'missing',
+        'tools',
+        'wholesale',
+        'heavy-transport',
+      ], token),
+    ])
+      .then(([maps, mainSubs]) => {
         const pick = (obj: Record<string, string[]> | undefined, keys: string[]): string[] => {
           if (!obj) return [];
           for (const [k, v] of Object.entries(obj)) {
@@ -141,6 +226,14 @@ export default function CategoriesPage() {
             if (keys.some((kw) => name.includes(kw))) return Array.isArray(v) ? v : [];
           }
           return [];
+        };
+        const findKey = (obj: Record<string, string[]> | undefined, keys: string[]): string => {
+          if (!obj) return '';
+          for (const k of Object.keys(obj)) {
+            const name = String(k || '').toLowerCase();
+            if (keys.some((kw) => name.includes(kw))) return k;
+          }
+          return '';
         };
         const buildMainSubs = (obj: Record<string, string[]> | undefined, mainKeys: string[], subKeys: string[]): Record<string, string[]> => {
           const mains = pick(obj, mainKeys);
@@ -156,6 +249,12 @@ export default function CategoriesPage() {
         const trans = pick(cars, ['فتيس', 'ناقل', 'transmission', 'gear']);
         const exterior = pick(cars, ['خارجي', 'exterior', 'color']);
         const ctype = pick(cars, ['النوع', 'type']);
+        setCarsYearKey(findKey(cars, ['سنة', 'year', 'تصنيع', 'model', 'manufacture', 'production']));
+        setCarsKmKey(findKey(cars, ['كيلو', 'كم', 'km', 'kilo', 'mileage']));
+        setCarsFuelKey(findKey(cars, ['وقود', 'fuel', 'gas']));
+        setCarsTransmissionKey(findKey(cars, ['فتيس', 'ناقل', 'transmission', 'gear']));
+        setCarsExteriorColorKey(findKey(cars, ['خارجي', 'exterior', 'color']));
+        setCarsTypeKey(findKey(cars, ['النوع', 'type']));
         if (year.length) setYearOptions(year.slice().sort((a, b) => Number(b) - Number(a)));
         if (kms.length) setKmOptions(kms);
         if (fuel.length) setFuelOptions(fuel);
@@ -165,57 +264,86 @@ export default function CategoriesPage() {
         const rent = maps['cars_rent'];
         const rYear = pick(rent, ['سنة', 'year', 'تصنيع', 'model']);
         const drv = pick(rent, ['سائق', 'driver']);
+        setRentalYearKey(findKey(rent, ['سنة', 'year', 'تصنيع', 'model']));
+        setDriverKey(findKey(rent, ['سائق', 'driver']));
         if (rYear.length) setRentalYearOptions(rYear.slice().sort((a, b) => Number(b) - Number(a)));
         if (drv.length) setDriverOptions(drv);
         const real = maps['real_estate'];
         const prop = pick(real, ['نوع العقار', 'property', 'estate', 'type']);
         const contract = pick(real, ['عقد', 'contract', 'rent', 'sale']);
+        setRealPropertyKey(findKey(real, ['نوع العقار', 'property', 'estate', 'type']));
+        setRealContractKey(findKey(real, ['عقد', 'contract', 'rent', 'sale']));
         if (prop.length) setPropertyTypeOptions(prop);
         if (contract.length) setContractTypeOptions(contract);
         const t = maps['teachers'];
-        const tSpec = pick(t, ['تخصص', 'specialty', 'subject']);
+        const tSpec = pick(t, ['specialization', 'teacher_specialty', 'تخصص', 'specialty', 'subject']);
+        const tKey = findKey(t, ['specialization', 'teacher_specialty', 'تخصص', 'specialty', 'subject']);
+        setTeacherSpecialtyKey(tKey || 'specialization');
         if (tSpec.length) setTeacherSpecialtyOptions(tSpec);
         const d = maps['doctors'];
-        const dSpec = pick(d, ['تخصص', 'specialty']);
+        const dSpec = pick(d, ['specialization', 'doctor_specialty', 'تخصص', 'specialty']);
+        const dKey = findKey(d, ['specialization', 'doctor_specialty', 'تخصص', 'specialty']);
+        setDoctorSpecialtyKey(dKey || 'specialization');
         if (dSpec.length) setDoctorSpecialtyOptions(dSpec);
         const j = maps['jobs'];
-        const jCat = pick(j, ['category', 'فئة', 'مجال', 'قسم']);
-        const jSpec = pick(j, ['specialty', 'تخصص']);
+        const jCat = pick(j, ['job_category', 'category', 'فئة', 'مجال', 'قسم']);
+        const jSpec = pick(j, ['specialization', 'specialty', 'تخصص']);
+        setJobCategoryKey(findKey(j, ['job_category', 'category', 'فئة', 'مجال', 'قسم']));
+        setJobSpecialtyKey(findKey(j, ['specialization', 'specialty', 'تخصص']));
         if (jCat.length) setJobCategoryOptions(jCat);
         if (jSpec.length) setJobSpecialtyOptions(jSpec);
-        setPARTS_MAIN_SUBS(buildMainSubs(maps['spare-parts'], ['قطعة', 'part', 'نوع', 'رئيس', 'main', 'category', 'قسم'], ['compatible', 'متوافق', 'موديل', 'model', 'فرعي', 'sub', 'brand', 'ماركة']));
-        setANIMALS_MAIN_SUBS(buildMainSubs(maps['animals'], ['نوع', 'animal', 'حيوان', 'طيور', 'category'], ['سلالة', 'breed', 'sub', 'فرعي']));
-        setFOOD_MAIN_SUBS(buildMainSubs(maps['food-products'], ['نوع', 'food', 'منتج', 'category'], ['sub', 'فرعي', 'فئة', 'تصنيف']));
-        setRESTAURANTS_MAIN_SUBS(buildMainSubs(maps['restaurants'], ['مطبخ', 'cuisine', 'نوع', 'category'], ['sub', 'فرعي', 'قائمة', 'menu']));
-        setSTORES_MAIN_SUBS(buildMainSubs(maps['stores'], ['نوع المتجر', 'store', 'نوع', 'category'], ['sub', 'فرعي']));
-        setGROCERIES_MAIN_SUBS(buildMainSubs(maps['groceries'], ['نوع', 'category', 'منتج'], ['sub', 'فرعي']));
-        setHOME_SERVICES_MAIN_SUBS(buildMainSubs(maps['home-services'], ['نوع الخدمة', 'service', 'نوع', 'category'], ['sub', 'فرعي']));
-        setFURNITURE_MAIN_SUBS(buildMainSubs(maps['furniture'], ['نوع الأثاث', 'furniture', 'نوع', 'category'], ['sub', 'فرعي', 'مادة', 'material']));
-        setHOUSEHOLD_TOOLS_MAIN_SUBS(buildMainSubs(maps['home-tools'], ['نوع الأداة', 'tool', 'نوع', 'category'], ['sub', 'فرعي']));
-        setHOME_APPLIANCES_MAIN_SUBS(buildMainSubs(maps['home-appliances'], ['نوع الجهاز', 'appliance', 'نوع', 'category'], ['sub', 'فرعي', 'موديل', 'model']));
-        setELECTRONICS_MAIN_SUBS(buildMainSubs(maps['electronics'], ['نوع الجهاز', 'device', 'نوع', 'category'], ['sub', 'فرعي', 'موديل', 'model']));
-        setHEALTH_MAIN_SUBS(buildMainSubs(maps['health'], ['نوع الخدمة', 'خدمة', 'category'], ['sub', 'فرعي', 'تخصص', 'specialty']));
-        setEDUCATION_MAIN_SUBS(buildMainSubs(maps['education'], ['مرحلة', 'المرحلة', 'education', 'category'], ['مادة', 'subject', 'sub', 'فرعي']));
-        setSHIPPING_MAIN_SUBS(buildMainSubs(maps['shipping'], ['نوع الشحن', 'shipping', 'نوع', 'category'], ['sub', 'فرعي']));
-        setMENS_CLOTHING_SHOES_MAIN_SUBS(buildMainSubs(maps['mens-clothes'], ['نوع المنتج', 'ملابس', 'category'], ['sub', 'فرعي', 'مقاس', 'size']));
-        setWATCHES_JEWELRY_MAIN_SUBS(buildMainSubs(maps['watches-jewelry'], ['نوع المنتج', 'ساعات', 'مجوهرات', 'category'], ['sub', 'فرعي']));
-        setFREELANCE_SERVICES_MAIN_SUBS(buildMainSubs(maps['free-professions'], ['نوع المهنة', 'مهن', 'category'], ['sub', 'فرعي']));
-        setCAR_SERVICES_MAIN_SUBS(buildMainSubs(maps['car-services'], ['نوع الخدمة', 'service', 'نوع', 'category'], ['sub', 'فرعي', 'سيارة', 'car']));
-        setGENERAL_MAINTENANCE_MAIN_SUBS(buildMainSubs(maps['maintenance'], ['نوع الصيانة', 'maintenance', 'نوع', 'category'], ['sub', 'فرعي']));
-        setCONSTRUCTION_TOOLS_MAIN_SUBS(buildMainSubs(maps['construction'], ['أدوات', 'construction', 'نوع', 'category'], ['sub', 'فرعي']));
-        setGYMS_MAIN_SUBS(buildMainSubs(maps['gym'], ['نوع العضوية', 'gym', 'نوع', 'category'], ['sub', 'فرعي']));
-        setBIKES_LIGHT_VEHICLES_MAIN_SUBS(buildMainSubs(maps['light-vehicles'], ['نوع المركبة', 'vehicle', 'نوع', 'category'], ['sub', 'فرعي']));
-        setMATERIALS_PRODUCTION_LINES_MAIN_SUBS(buildMainSubs(maps['production-lines'], ['خط', 'line', 'مادة', 'material', 'category'], ['sub', 'فرعي']));
-        setFARMS_FACTORIES_PRODUCTS_MAIN_SUBS(buildMainSubs(maps['farm-products'], ['نوع المنتج', 'product', 'category'], ['sub', 'فرعي']));
-        setLIGHTING_DECOR_MAIN_SUBS(buildMainSubs(maps['lighting-decor'], ['نوع المنتج', 'إضاءة', 'ديكور', 'category'], ['sub', 'فرعي']));
-        setMISSING_MAIN_SUBS(buildMainSubs(maps['missing'], ['نوع المفقود', 'missing', 'category'], ['sub', 'فرعي', 'تاريخ', 'date']));
-        setTOOLS_SUPPLIES_MAIN_SUBS(buildMainSubs(maps['tools'], ['نوع العدة', 'tools', 'نوع', 'category'], ['sub', 'فرعي']));
-        setWHOLESALE_MAIN_SUBS(buildMainSubs(maps['wholesale'], ['نوع المنتج', 'wholesale', 'category'], ['sub', 'فرعي']));
-        setHEAVY_EQUIPMENT_MAIN_SUBS(buildMainSubs(maps['heavy-transport'], ['نوع المعدة', 'equipment', 'نوع', 'category'], ['sub', 'فرعي']));
+        setPARTS_MAIN_SUBS(Object.keys(mainSubs['spare-parts'] ?? {}).length ? (mainSubs['spare-parts'] as Record<string, string[]>) : buildMainSubs(maps['spare-parts'], ['قطعة', 'part', 'نوع', 'رئيس', 'main', 'category', 'قسم'], ['compatible', 'متوافق', 'موديل', 'model', 'فرعي', 'sub', 'brand', 'ماركة']));
+        setANIMALS_MAIN_SUBS(Object.keys(mainSubs['animals'] ?? {}).length ? (mainSubs['animals'] as Record<string, string[]>) : buildMainSubs(maps['animals'], ['نوع', 'animal', 'حيوان', 'طيور', 'category'], ['سلالة', 'breed', 'sub', 'فرعي']));
+        setAnimalsMainKey(findKey(maps['animals'], ['نوع', 'animal', 'حيوان', 'طيور', 'category']));
+        setAnimalsSubKey(findKey(maps['animals'], ['سلالة', 'breed', 'sub', 'فرعي']));
+        setFOOD_MAIN_SUBS(Object.keys(mainSubs['food-products'] ?? {}).length ? (mainSubs['food-products'] as Record<string, string[]>) : buildMainSubs(maps['food-products'], ['نوع', 'food', 'منتج', 'category'], ['sub', 'فرعي', 'فئة', 'تصنيف']));
+        setFoodMainKey(findKey(maps['food-products'], ['نوع', 'food', 'منتج', 'category']));
+        setFoodSubKey(findKey(maps['food-products'], ['sub', 'فرعي', 'فئة', 'تصنيف']));
+        setRESTAURANTS_MAIN_SUBS(Object.keys(mainSubs['restaurants'] ?? {}).length ? (mainSubs['restaurants'] as Record<string, string[]>) : buildMainSubs(maps['restaurants'], ['مطبخ', 'cuisine', 'نوع', 'category'], ['sub', 'فرعي', 'قائمة', 'menu']));
+        setRestaurantsMainKey(findKey(maps['restaurants'], ['مطبخ', 'cuisine', 'نوع', 'category']));
+        setRestaurantsSubKey(findKey(maps['restaurants'], ['sub', 'فرعي', 'قائمة', 'menu']));
+        setSTORES_MAIN_SUBS(Object.keys(mainSubs['stores'] ?? {}).length ? (mainSubs['stores'] as Record<string, string[]>) : buildMainSubs(maps['stores'], ['نوع المتجر', 'store', 'نوع', 'category'], ['sub', 'فرعي']));
+        setStoresMainKey(findKey(maps['stores'], ['نوع المتجر', 'store', 'نوع', 'category']));
+        setStoresSubKey(findKey(maps['stores'], ['sub', 'فرعي']));
+        setGROCERIES_MAIN_SUBS(Object.keys(mainSubs['groceries'] ?? {}).length ? (mainSubs['groceries'] as Record<string, string[]>) : buildMainSubs(maps['groceries'], ['نوع', 'category', 'منتج'], ['sub', 'فرعي']));
+        setGroceriesMainKey(findKey(maps['groceries'], ['نوع', 'category', 'منتج']));
+        setGroceriesSubKey(findKey(maps['groceries'], ['sub', 'فرعي']));
+        setKIDS_SUPPLIES_TOYS_MAIN_SUBS(
+          Object.keys(mainSubs['kids-toys'] ?? {}).length
+            ? (mainSubs['kids-toys'] as Record<string, string[]>)
+            : buildMainSubs(
+                maps['kids-toys'],
+                ['نوع', 'category', 'لعب', 'مستلزمات', 'أطفال'],
+                ['sub', 'فرعي']
+              )
+        );
+        setHOME_SERVICES_MAIN_SUBS(Object.keys(mainSubs['home-services'] ?? {}).length ? (mainSubs['home-services'] as Record<string, string[]>) : buildMainSubs(maps['home-services'], ['نوع الخدمة', 'service', 'نوع', 'category'], ['sub', 'فرعي']));
+        setFURNITURE_MAIN_SUBS(Object.keys(mainSubs['furniture'] ?? {}).length ? (mainSubs['furniture'] as Record<string, string[]>) : buildMainSubs(maps['furniture'], ['نوع الأثاث', 'furniture', 'نوع', 'category'], ['sub', 'فرعي', 'مادة', 'material']));
+        setHOUSEHOLD_TOOLS_MAIN_SUBS(Object.keys(mainSubs['home-tools'] ?? {}).length ? (mainSubs['home-tools'] as Record<string, string[]>) : buildMainSubs(maps['home-tools'], ['نوع الأداة', 'tool', 'نوع', 'category'], ['sub', 'فرعي']));
+        setHOME_APPLIANCES_MAIN_SUBS(Object.keys(mainSubs['home-appliances'] ?? {}).length ? (mainSubs['home-appliances'] as Record<string, string[]>) : buildMainSubs(maps['home-appliances'], ['نوع الجهاز', 'appliance', 'نوع', 'category'], ['sub', 'فرعي', 'موديل', 'model']));
+        setELECTRONICS_MAIN_SUBS(Object.keys(mainSubs['electronics'] ?? {}).length ? (mainSubs['electronics'] as Record<string, string[]>) : buildMainSubs(maps['electronics'], ['نوع الجهاز', 'device', 'نوع', 'category'], ['sub', 'فرعي', 'موديل', 'model']));
+        setHEALTH_MAIN_SUBS(Object.keys(mainSubs['health'] ?? {}).length ? (mainSubs['health'] as Record<string, string[]>) : buildMainSubs(maps['health'], ['نوع الخدمة', 'خدمة', 'category'], ['sub', 'فرعي', 'تخصص', 'specialty']));
+        setEDUCATION_MAIN_SUBS(Object.keys(mainSubs['education'] ?? {}).length ? (mainSubs['education'] as Record<string, string[]>) : buildMainSubs(maps['education'], ['مرحلة', 'المرحلة', 'education', 'category'], ['مادة', 'subject', 'sub', 'فرعي']));
+        setSHIPPING_MAIN_SUBS(Object.keys(mainSubs['shipping'] ?? {}).length ? (mainSubs['shipping'] as Record<string, string[]>) : buildMainSubs(maps['shipping'], ['نوع الشحن', 'shipping', 'نوع', 'category'], ['sub', 'فرعي']));
+        setMENS_CLOTHING_SHOES_MAIN_SUBS(Object.keys(mainSubs['mens-clothes'] ?? {}).length ? (mainSubs['mens-clothes'] as Record<string, string[]>) : buildMainSubs(maps['mens-clothes'], ['نوع المنتج', 'ملابس', 'category'], ['sub', 'فرعي', 'مقاس', 'size']));
+        setWATCHES_JEWELRY_MAIN_SUBS(Object.keys(mainSubs['watches-jewelry'] ?? {}).length ? (mainSubs['watches-jewelry'] as Record<string, string[]>) : buildMainSubs(maps['watches-jewelry'], ['نوع المنتج', 'ساعات', 'مجوهرات', 'category'], ['sub', 'فرعي']));
+        setFREELANCE_SERVICES_MAIN_SUBS(Object.keys(mainSubs['free-professions'] ?? {}).length ? (mainSubs['free-professions'] as Record<string, string[]>) : buildMainSubs(maps['free-professions'], ['نوع المهنة', 'مهن', 'category'], ['sub', 'فرعي']));
+        setCAR_SERVICES_MAIN_SUBS(Object.keys(mainSubs['car-services'] ?? {}).length ? (mainSubs['car-services'] as Record<string, string[]>) : buildMainSubs(maps['car-services'], ['نوع الخدمة', 'service', 'نوع', 'category'], ['sub', 'فرعي', 'سيارة', 'car']));
+        setGENERAL_MAINTENANCE_MAIN_SUBS(Object.keys(mainSubs['maintenance'] ?? {}).length ? (mainSubs['maintenance'] as Record<string, string[]>) : buildMainSubs(maps['maintenance'], ['نوع الصيانة', 'maintenance', 'نوع', 'category'], ['sub', 'فرعي']));
+        setCONSTRUCTION_TOOLS_MAIN_SUBS(Object.keys(mainSubs['construction'] ?? {}).length ? (mainSubs['construction'] as Record<string, string[]>) : buildMainSubs(maps['construction'], ['أدوات', 'construction', 'نوع', 'category'], ['sub', 'فرعي']));
+        setGYMS_MAIN_SUBS(Object.keys(mainSubs['gym'] ?? {}).length ? (mainSubs['gym'] as Record<string, string[]>) : buildMainSubs(maps['gym'], ['نوع العضوية', 'gym', 'نوع', 'category'], ['sub', 'فرعي']));
+        setBIKES_LIGHT_VEHICLES_MAIN_SUBS(Object.keys(mainSubs['light-vehicles'] ?? {}).length ? (mainSubs['light-vehicles'] as Record<string, string[]>) : buildMainSubs(maps['light-vehicles'], ['نوع المركبة', 'vehicle', 'نوع', 'category'], ['sub', 'فرعي']));
+        setMATERIALS_PRODUCTION_LINES_MAIN_SUBS(Object.keys(mainSubs['production-lines'] ?? {}).length ? (mainSubs['production-lines'] as Record<string, string[]>) : buildMainSubs(maps['production-lines'], ['خط', 'line', 'مادة', 'material', 'category'], ['sub', 'فرعي']));
+        setFARMS_FACTORIES_PRODUCTS_MAIN_SUBS(Object.keys(mainSubs['farm-products'] ?? {}).length ? (mainSubs['farm-products'] as Record<string, string[]>) : buildMainSubs(maps['farm-products'], ['نوع المنتج', 'product', 'category'], ['sub', 'فرعي']));
+        setLIGHTING_DECOR_MAIN_SUBS(Object.keys(mainSubs['lighting-decor'] ?? {}).length ? (mainSubs['lighting-decor'] as Record<string, string[]>) : buildMainSubs(maps['lighting-decor'], ['نوع المنتج', 'إضاءة', 'ديكور', 'category'], ['sub', 'فرعي']));
+        setMISSING_MAIN_SUBS(Object.keys(mainSubs['missing'] ?? {}).length ? (mainSubs['missing'] as Record<string, string[]>) : buildMainSubs(maps['missing'], ['نوع المفقود', 'missing', 'category'], ['sub', 'فرعي', 'تاريخ', 'date']));
+        setTOOLS_SUPPLIES_MAIN_SUBS(Object.keys(mainSubs['tools'] ?? {}).length ? (mainSubs['tools'] as Record<string, string[]>) : buildMainSubs(maps['tools'], ['نوع العدة', 'tools', 'نوع', 'category'], ['sub', 'فرعي']));
+        setWHOLESALE_MAIN_SUBS(Object.keys(mainSubs['wholesale'] ?? {}).length ? (mainSubs['wholesale'] as Record<string, string[]>) : buildMainSubs(maps['wholesale'], ['نوع المنتج', 'wholesale', 'category'], ['sub', 'فرعي']));
+        setHEAVY_EQUIPMENT_MAIN_SUBS(Object.keys(mainSubs['heavy-transport'] ?? {}).length ? (mainSubs['heavy-transport'] as Record<string, string[]>) : buildMainSubs(maps['heavy-transport'], ['نوع المعدة', 'equipment', 'نوع', 'category'], ['sub', 'فرعي']));
         const parts = maps['spare-parts'];
         const brands = pick(parts, ['ماركة', 'brand', 'الشركة']);
         const models = pick(parts, ['موديل', 'model', 'طراز', 'type']);
-        if (brands.length && models.length) setPARTS_BRANDS_MODELS(Object.fromEntries(brands.map(b => [b, models])));
+        if (brands.length && models.length) setPARTS_BRANDS_MODELS(prev => (prev && Object.keys(prev).length ? prev : Object.fromEntries(brands.map(b => [b, models]))));
       })
       .catch(() => {});
   }, []);
@@ -280,6 +408,30 @@ export default function CategoriesPage() {
   const [jobSpecialty, setJobSpecialty] = useState('');
   const [jobSpecialtyOptions, setJobSpecialtyOptions] = useState<string[]>(JOB_SPECIALTIES);
   const [newJobSpecialtyVal, setNewJobSpecialtyVal] = useState('');
+  const [carsYearKey, setCarsYearKey] = useState('');
+  const [carsKmKey, setCarsKmKey] = useState('');
+  const [carsFuelKey, setCarsFuelKey] = useState('');
+  const [carsTransmissionKey, setCarsTransmissionKey] = useState('');
+  const [carsExteriorColorKey, setCarsExteriorColorKey] = useState('');
+  const [carsTypeKey, setCarsTypeKey] = useState('');
+  const [rentalYearKey, setRentalYearKey] = useState('');
+  const [driverKey, setDriverKey] = useState('');
+  const [realPropertyKey, setRealPropertyKey] = useState('');
+  const [realContractKey, setRealContractKey] = useState('');
+  const [teacherSpecialtyKey, setTeacherSpecialtyKey] = useState('');
+  const [doctorSpecialtyKey, setDoctorSpecialtyKey] = useState('');
+  const [jobCategoryKey, setJobCategoryKey] = useState('');
+  const [jobSpecialtyKey, setJobSpecialtyKey] = useState('');
+  const [animalsMainKey, setAnimalsMainKey] = useState('');
+  const [animalsSubKey, setAnimalsSubKey] = useState('');
+  const [foodMainKey, setFoodMainKey] = useState('');
+  const [foodSubKey, setFoodSubKey] = useState('');
+  const [restaurantsMainKey, setRestaurantsMainKey] = useState('');
+  const [restaurantsSubKey, setRestaurantsSubKey] = useState('');
+  const [storesMainKey, setStoresMainKey] = useState('');
+  const [storesSubKey, setStoresSubKey] = useState('');
+  const [groceriesMainKey, setGroceriesMainKey] = useState('');
+  const [groceriesSubKey, setGroceriesSubKey] = useState('');
   const [FOOD_MAIN_SUBS, setFOOD_MAIN_SUBS] = useState<Record<string, string[]>>({});
   const [selectedFoodMain, setSelectedFoodMain] = useState('');
   const [selectedFoodSub, setSelectedFoodSub] = useState('');
@@ -1149,15 +1301,23 @@ export default function CategoriesPage() {
     }
   };
 
-  const addBrand = () => {
+  const addBrand = async () => {
     const name = newBrand.trim();
     if (!name) return;
-    setBRANDS_MODELS(prev => {
-      if (prev[name]) return prev;
-      return { ...prev, [name]: [] };
-    });
-    setSelectedBrand(name);
-    setNewBrand('');
+    try {
+      const created = await postAdminMake(name);
+      setBRANDS_MODELS(prev => {
+        if (prev[created.name]) return prev;
+        return { ...prev, [created.name]: [] };
+      });
+      setMAKE_IDS(prev => ({ ...prev, [created.name]: created.id }));
+      setSelectedBrand(created.name);
+      setNewBrand('');
+      showToast('تم إضافة الماركة', 'success');
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في إضافة الماركة';
+      showToast(msg, 'error');
+    }
   };
 
   const removeBrand = (name: string) => {
@@ -1186,22 +1346,32 @@ export default function CategoriesPage() {
     showToast('تم تعديل الماركة', 'success');
   };
 
-  const addModelsBulk = () => {
+  const addModelsBulk = async () => {
     if (!selectedBrand) return;
     const raw = newModelsBulk;
     const tokens = raw
-      .split(/[\,\n]/)
+      .split(/[\,\n،]/)
       .map(t => t.trim())
       .filter(t => t.length > 0);
     if (tokens.length === 0) return;
-    setBRANDS_MODELS(prev => {
-      const existing = prev[selectedBrand] ?? [];
-      const toAdd = tokens.filter(m => !existing.includes(m));
-      if (toAdd.length === 0) return prev;
-      return { ...prev, [selectedBrand]: [...existing, ...toAdd] };
-    });
-    setSelectedModel('');
-    setNewModelsBulk('');
+    const makeId = await ensureMakeId(selectedBrand);
+    if (!makeId) return;
+    try {
+      const resp = await postAdminMakeModels(makeId, tokens);
+      const createdNames = Array.isArray(resp.models) ? resp.models.map(m => String(m.name).trim()).filter(Boolean) : tokens;
+      setBRANDS_MODELS(prev => {
+        const existing = prev[selectedBrand] ?? [];
+        const toAdd = createdNames.filter(m => !existing.includes(m));
+        if (toAdd.length === 0) return prev;
+        return { ...prev, [selectedBrand]: [...existing, ...toAdd] };
+      });
+      setSelectedModel('');
+      setNewModelsBulk('');
+      showToast('تم تسليم الموديلات', 'success');
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في إضافة الموديلات';
+      showToast(msg, 'error');
+    }
   };
 
   const removeModel = (m: string) => {
@@ -1224,15 +1394,23 @@ export default function CategoriesPage() {
     if (selectedModel === prevName) setSelectedModel(next);
     showToast('تم تعديل الموديل', 'success');
   };
-  const addPartsBrand = () => {
+  const addPartsBrand = async () => {
     const name = newPartsBrand.trim();
     if (!name) return;
-    setPARTS_BRANDS_MODELS(prev => {
-      if (prev[name]) return prev;
-      return { ...prev, [name]: [] };
-    });
-    setSelectedPartsBrand(name);
-    setNewPartsBrand('');
+    try {
+      const created = await postAdminMake(name);
+      setPARTS_BRANDS_MODELS(prev => {
+        if (prev[created.name]) return prev;
+        return { ...prev, [created.name]: [] };
+      });
+      setMAKE_IDS(prev => ({ ...prev, [created.name]: created.id }));
+      setSelectedPartsBrand(created.name);
+      setNewPartsBrand('');
+      showToast('تم إضافة الماركة', 'success');
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في إضافة الماركة';
+      showToast(msg, 'error');
+    }
   };
   const removePartsBrand = (name: string) => {
     setPARTS_BRANDS_MODELS(prev => {
@@ -1245,19 +1423,29 @@ export default function CategoriesPage() {
       setSelectedPartsModel('');
     }
   };
-  const addPartsModelsBulk = () => {
+  const addPartsModelsBulk = async () => {
     if (!selectedPartsBrand) return;
     const raw = newPartsModelsBulk;
-    const tokens = raw.split(/[\,\n]/).map(t => t.trim()).filter(t => t.length > 0);
+    const tokens = raw.split(/[\,\n،]/).map(t => t.trim()).filter(t => t.length > 0);
     if (tokens.length === 0) return;
-    setPARTS_BRANDS_MODELS(prev => {
-      const existing = prev[selectedPartsBrand] ?? [];
-      const toAdd = tokens.filter(m => !existing.includes(m));
-      if (toAdd.length === 0) return prev;
-      return { ...prev, [selectedPartsBrand]: [...existing, ...toAdd] };
-    });
-    setSelectedPartsModel('');
-    setNewPartsModelsBulk('');
+    const makeId = await ensureMakeId(selectedPartsBrand);
+    if (!makeId) return;
+    try {
+      const resp = await postAdminMakeModels(makeId, tokens);
+      const createdNames = Array.isArray(resp.models) ? resp.models.map(m => String(m.name).trim()).filter(Boolean) : tokens;
+      setPARTS_BRANDS_MODELS(prev => {
+        const existing = prev[selectedPartsBrand] ?? [];
+        const toAdd = createdNames.filter(m => !existing.includes(m));
+        if (toAdd.length === 0) return prev;
+        return { ...prev, [selectedPartsBrand]: [...existing, ...toAdd] };
+      });
+      setSelectedPartsModel('');
+      setNewPartsModelsBulk('');
+      showToast('تم تسليم الموديلات', 'success');
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في إضافة الموديلات';
+      showToast(msg, 'error');
+    }
   };
   const removePartsModel = (m: string) => {
     if (!selectedPartsBrand) return;
@@ -1266,6 +1454,34 @@ export default function CategoriesPage() {
       return { ...prev, [selectedPartsBrand]: list.filter(x => x !== m) };
     });
     if (selectedPartsModel === m) setSelectedPartsModel('');
+  };
+
+  const renamePartsBrand = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setPARTS_BRANDS_MODELS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedPartsBrand === prevName) setSelectedPartsBrand(next);
+    showToast('تم تعديل الماركة', 'success');
+  };
+
+  const renamePartsModel = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedPartsBrand) return;
+    setPARTS_BRANDS_MODELS(prev => {
+      const list = prev[selectedPartsBrand] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedPartsBrand]: updated };
+    });
+    if (selectedPartsModel === prevName) setSelectedPartsModel(next);
+    showToast('تم تعديل الموديل', 'success');
   };
   const addPartsMain = () => {
     const name = newPartsMain.trim();
@@ -1310,6 +1526,32 @@ export default function CategoriesPage() {
     });
     if (selectedPartsSub === s) setSelectedPartsSub('');
   };
+  const renamePartsMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setPARTS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedPartsMain === prevName) setSelectedPartsMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renamePartsSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedPartsMain) return;
+    setPARTS_MAIN_SUBS(prev => {
+      const list = prev[selectedPartsMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedPartsMain]: updated };
+    });
+    if (selectedPartsSub === prevName) setSelectedPartsSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
   const addAnimalMain = () => {
     const name = newAnimalMain.trim();
     if (!name) return;
@@ -1317,6 +1559,8 @@ export default function CategoriesPage() {
       if (prev[name]) return prev;
       return { ...prev, [name]: [] };
     });
+    const nextMains = Object.keys(ANIMALS_MAIN_SUBS).includes(name) ? Object.keys(ANIMALS_MAIN_SUBS) : [...Object.keys(ANIMALS_MAIN_SUBS), name];
+    updateOptionsWithToast('animals', animalsMainKey, nextMains, 'تم إضافة الرئيسي');
     setSelectedAnimalMain(name);
     setNewAnimalMain('');
   };
@@ -1332,7 +1576,8 @@ export default function CategoriesPage() {
       return n;
     });
     if (selectedAnimalMain === prevName) setSelectedAnimalMain(next);
-    showToast('تم تعديل الرئيسي', 'success');
+    const mains = Object.keys(ANIMALS_MAIN_SUBS).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('animals', animalsMainKey, mains, 'تم تعديل الرئيسي');
   };
   const removeAnimalMain = (name: string) => {
     setANIMALS_MAIN_SUBS(prev => {
@@ -1344,6 +1589,8 @@ export default function CategoriesPage() {
       setSelectedAnimalMain('');
       setSelectedAnimalSub('');
     }
+    const mains = Object.keys(ANIMALS_MAIN_SUBS).filter(x => x !== name);
+    updateOptionsWithToast('animals', animalsMainKey, mains, 'تم حذف الرئيسي');
   };
   const addAnimalSubsBulk = () => {
     if (!selectedAnimalMain) return;
@@ -1356,6 +1603,8 @@ export default function CategoriesPage() {
       if (toAdd.length === 0) return prev;
       return { ...prev, [selectedAnimalMain]: [...existing, ...toAdd] };
     });
+    const list = (ANIMALS_MAIN_SUBS[selectedAnimalMain] ?? []).concat(tokens.filter(s => !((ANIMALS_MAIN_SUBS[selectedAnimalMain] ?? []).includes(s))));
+    updateOptionsWithToast('animals', animalsSubKey, list, 'تم تحديث الفرعي');
     setSelectedAnimalSub('');
     setNewAnimalSubsBulk('');
   };
@@ -1366,6 +1615,8 @@ export default function CategoriesPage() {
       return { ...prev, [selectedAnimalMain]: list.filter(x => x !== s) };
     });
     if (selectedAnimalSub === s) setSelectedAnimalSub('');
+    const list = (ANIMALS_MAIN_SUBS[selectedAnimalMain] ?? []).filter(x => x !== s);
+    updateOptionsWithToast('animals', animalsSubKey, list, 'تم حذف الفرعي');
   };
   const renameAnimalSub = (prevName: string, nextRaw: string) => {
     const next = nextRaw.trim();
@@ -1377,18 +1628,27 @@ export default function CategoriesPage() {
       return { ...prev, [selectedAnimalMain]: updated };
     });
     if (selectedAnimalSub === prevName) setSelectedAnimalSub(next);
-    showToast('تم تعديل الفرعي', 'success');
+    const updated = (ANIMALS_MAIN_SUBS[selectedAnimalMain] ?? []).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('animals', animalsSubKey, updated, 'تم تعديل الفرعي');
   };
 
-  const addRentalBrand = () => {
+  const addRentalBrand = async () => {
     const name = newRentalBrand.trim();
     if (!name) return;
-    setRENTAL_BRANDS_MODELS(prev => {
-      if (prev[name]) return prev;
-      return { ...prev, [name]: [] };
-    });
-    setSelectedRentalBrand(name);
-    setNewRentalBrand('');
+    try {
+      const created = await postAdminMake(name);
+      setRENTAL_BRANDS_MODELS(prev => {
+        if (prev[created.name]) return prev;
+        return { ...prev, [created.name]: [] };
+      });
+      setMAKE_IDS(prev => ({ ...prev, [created.name]: created.id }));
+      setSelectedRentalBrand(created.name);
+      setNewRentalBrand('');
+      showToast('تم إضافة الماركة', 'success');
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في إضافة الماركة';
+      showToast(msg, 'error');
+    }
   };
 
   const removeRentalBrand = (name: string) => {
@@ -1403,19 +1663,44 @@ export default function CategoriesPage() {
     }
   };
 
-  const addRentalModelsBulk = () => {
+  const renameRentalBrand = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setRENTAL_BRANDS_MODELS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedRentalBrand === prevName) setSelectedRentalBrand(next);
+    showToast('تم تعديل الماركة', 'success');
+  };
+
+  const addRentalModelsBulk = async () => {
     if (!selectedRentalBrand) return;
     const raw = newRentalModelsBulk;
-    const tokens = raw.split(/[\,\n]/).map(t => t.trim()).filter(t => t.length > 0);
+    const tokens = raw.split(/[\,\n،]/).map(t => t.trim()).filter(t => t.length > 0);
     if (tokens.length === 0) return;
-    setRENTAL_BRANDS_MODELS(prev => {
-      const existing = prev[selectedRentalBrand] ?? [];
-      const toAdd = tokens.filter(m => !existing.includes(m));
-      if (toAdd.length === 0) return prev;
-      return { ...prev, [selectedRentalBrand]: [...existing, ...toAdd] };
-    });
-    setSelectedRentalModel('');
-    setNewRentalModelsBulk('');
+    const makeId = await ensureMakeId(selectedRentalBrand);
+    if (!makeId) return;
+    try {
+      const resp = await postAdminMakeModels(makeId, tokens);
+      const createdNames = Array.isArray(resp.models) ? resp.models.map(m => String(m.name).trim()).filter(Boolean) : tokens;
+      setRENTAL_BRANDS_MODELS(prev => {
+        const existing = prev[selectedRentalBrand] ?? [];
+        const toAdd = createdNames.filter(m => !existing.includes(m));
+        if (toAdd.length === 0) return prev;
+        return { ...prev, [selectedRentalBrand]: [...existing, ...toAdd] };
+      });
+      setSelectedRentalModel('');
+      setNewRentalModelsBulk('');
+      showToast('تم تسليم الموديلات', 'success');
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as any).message : 'حدث خطأ في إضافة الموديلات';
+      showToast(msg, 'error');
+    }
   };
 
   const removeRentalModel = (m: string) => {
@@ -1427,193 +1712,458 @@ export default function CategoriesPage() {
     if (selectedRentalModel === m) setSelectedRentalModel('');
   };
 
+  const renameRentalModel = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedRentalBrand) return;
+    setRENTAL_BRANDS_MODELS(prev => {
+      const list = prev[selectedRentalBrand] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedRentalBrand]: updated };
+    });
+    if (selectedRentalModel === prevName) setSelectedRentalModel(next);
+    showToast('تم تعديل الموديل', 'success');
+  };
+
   const addRentalYearOption = () => {
     const v = newRentalYear.trim();
     if (!v) return;
-    setRentalYearOptions(prev => prev.includes(v) ? prev : [v, ...prev].sort((a, b) => Number(b) - Number(a)));
+    const next = (rentalYearOptions.includes(v) ? rentalYearOptions : [v, ...rentalYearOptions]).sort((a, b) => Number(b) - Number(a));
+    setRentalYearOptions(next);
+    updateOptionsWithToast('cars_rent', rentalYearKey, next, 'تم إضافة السنة');
     setNewRentalYear('');
   };
 
   const deleteSelectedRentalYearOption = () => {
     const v = rentalYear;
     if (!v) return;
-    setRentalYearOptions(prev => prev.filter(x => x !== v));
+    const next = rentalYearOptions.filter(x => x !== v);
+    setRentalYearOptions(next);
+    updateOptionsWithToast('cars_rent', rentalYearKey, next, 'تم حذف السنة');
     setRentalYear('');
+  };
+  const deleteRentalYearOption = (opt: string) => {
+    const next = rentalYearOptions.filter(x => x !== opt);
+    setRentalYearOptions(next);
+    updateOptionsWithToast('cars_rent', rentalYearKey, next, 'تم حذف السنة');
+    if (rentalYear === opt) setRentalYear('');
+  };
+  const renameRentalYearOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = rentalYearOptions.map(x => (x === prev ? n : x)).sort((a, b) => Number(b) - Number(a));
+    setRentalYearOptions(next);
+    updateOptionsWithToast('cars_rent', rentalYearKey, next, 'تم تعديل السنة');
+    if (rentalYear === prev) setRentalYear(n);
   };
 
   const addDriverOption = () => {
     const v = newDriverVal.trim();
     if (!v) return;
-    setDriverOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = driverOptions.includes(v) ? driverOptions : [...driverOptions, v];
+    setDriverOptions(next);
+    updateOptionsWithToast('cars_rent', driverKey, next, 'تم إضافة خيار السائق');
     setNewDriverVal('');
   };
 
   const deleteSelectedDriverOption = () => {
     const v = driver;
     if (!v) return;
-    setDriverOptions(prev => prev.filter(x => x !== v));
+    const next = driverOptions.filter(x => x !== v);
+    setDriverOptions(next);
+    updateOptionsWithToast('cars_rent', driverKey, next, 'تم حذف خيار السائق');
     setDriver('');
+  };
+  const deleteDriverOption = (opt: string) => {
+    const next = driverOptions.filter(x => x !== opt);
+    setDriverOptions(next);
+    updateOptionsWithToast('cars_rent', driverKey, next, 'تم حذف خيار السائق');
+    if (driver === opt) setDriver('');
+  };
+  const renameDriverOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = driverOptions.map(x => (x === prev ? n : x));
+    setDriverOptions(next);
+    updateOptionsWithToast('cars_rent', driverKey, next, 'تم تعديل خيار السائق');
+    if (driver === prev) setDriver(n);
   };
 
   const addPropertyTypeOption = () => {
     const v = newPropertyTypeVal.trim();
     if (!v) return;
-    setPropertyTypeOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = propertyTypeOptions.includes(v) ? propertyTypeOptions : [...propertyTypeOptions, v];
+    setPropertyTypeOptions(next);
+    updateOptionsWithToast('real_estate', realPropertyKey, next, 'تم إضافة نوع العقار');
     setNewPropertyTypeVal('');
   };
 
   const deleteSelectedPropertyTypeOption = () => {
     const v = propertyType;
     if (!v) return;
-    setPropertyTypeOptions(prev => prev.filter(x => x !== v));
+    const next = propertyTypeOptions.filter(x => x !== v);
+    setPropertyTypeOptions(next);
+    updateOptionsWithToast('real_estate', realPropertyKey, next, 'تم حذف نوع العقار');
     setPropertyType('');
+  };
+  const deletePropertyTypeOptionDirect = (opt: string) => {
+    const next = propertyTypeOptions.filter(x => x !== opt);
+    setPropertyTypeOptions(next);
+    updateOptionsWithToast('real_estate', realPropertyKey, next, 'تم حذف نوع العقار');
+    if (propertyType === opt) setPropertyType('');
+  };
+  const renamePropertyTypeOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = propertyTypeOptions.map(x => (x === prev ? n : x));
+    setPropertyTypeOptions(next);
+    updateOptionsWithToast('real_estate', realPropertyKey, next, 'تم تعديل نوع العقار');
+    if (propertyType === prev) setPropertyType(n);
   };
 
   const addContractTypeOption = () => {
     const v = newContractTypeVal.trim();
     if (!v) return;
-    setContractTypeOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = contractTypeOptions.includes(v) ? contractTypeOptions : [...contractTypeOptions, v];
+    setContractTypeOptions(next);
+    updateOptionsWithToast('real_estate', realContractKey, next, 'تم إضافة نوع العقد');
     setNewContractTypeVal('');
   };
 
   const deleteSelectedContractTypeOption = () => {
     const v = contractType;
     if (!v) return;
-    setContractTypeOptions(prev => prev.filter(x => x !== v));
+    const next = contractTypeOptions.filter(x => x !== v);
+    setContractTypeOptions(next);
+    updateOptionsWithToast('real_estate', realContractKey, next, 'تم حذف نوع العقد');
     setContractType('');
+  };
+  const deleteContractTypeOptionDirect = (opt: string) => {
+    const next = contractTypeOptions.filter(x => x !== opt);
+    setContractTypeOptions(next);
+    updateOptionsWithToast('real_estate', realContractKey, next, 'تم حذف نوع العقد');
+    if (contractType === opt) setContractType('');
+  };
+  const renameContractTypeOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = contractTypeOptions.map(x => (x === prev ? n : x));
+    setContractTypeOptions(next);
+    updateOptionsWithToast('real_estate', realContractKey, next, 'تم تعديل نوع العقد');
+    if (contractType === prev) setContractType(n);
   };
 
   const addYearOption = () => {
     const v = newYear.trim();
     if (!v) return;
-    setYearOptions(prev => prev.includes(v) ? prev : [v, ...prev].sort((a, b) => Number(b) - Number(a)));
+    const next = (yearOptions.includes(v) ? yearOptions : [v, ...yearOptions]).sort((a, b) => Number(b) - Number(a));
+    setYearOptions(next);
+    updateOptionsWithToast('cars', carsYearKey, next, 'تم إضافة السنة');
     setNewYear('');
   };
 
   const deleteSelectedYearOption = () => {
     const v = manufactureYear;
     if (!v) return;
-    setYearOptions(prev => prev.filter(x => x !== v));
+    const next = yearOptions.filter(x => x !== v);
+    setYearOptions(next);
+    updateOptionsWithToast('cars', carsYearKey, next, 'تم حذف السنة');
     setManufactureYear('');
+  };
+  const deleteYearOption = (opt: string) => {
+    const next = yearOptions.filter(x => x !== opt);
+    setYearOptions(next);
+    updateOptionsWithToast('cars', carsYearKey, next, 'تم حذف السنة');
+    if (manufactureYear === opt) setManufactureYear('');
+  };
+  const renameYearOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = yearOptions.map(x => (x === prev ? n : x)).sort((a, b) => Number(b) - Number(a));
+    setYearOptions(next);
+    updateOptionsWithToast('cars', carsYearKey, next, 'تم تعديل السنة');
+    if (manufactureYear === prev) setManufactureYear(n);
   };
 
   const addKmOption = () => {
     const v = newKm.trim();
     if (!v) return;
-    setKmOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = kmOptions.includes(v) ? kmOptions : [...kmOptions, v];
+    setKmOptions(next);
+    updateOptionsWithToast('cars', carsKmKey, next, 'تم إضافة الكيلومترات');
     setNewKm('');
   };
 
   const deleteSelectedKmOption = () => {
     const v = kilometersRange;
     if (!v) return;
-    setKmOptions(prev => prev.filter(x => x !== v));
+    const next = kmOptions.filter(x => x !== v);
+    setKmOptions(next);
+    updateOptionsWithToast('cars', carsKmKey, next, 'تم حذف الكيلومترات');
     setKilometersRange('');
+  };
+  const deleteKmOption = (opt: string) => {
+    const next = kmOptions.filter(x => x !== opt);
+    setKmOptions(next);
+    updateOptionsWithToast('cars', carsKmKey, next, 'تم حذف الكيلومترات');
+    if (kilometersRange === opt) setKilometersRange('');
+  };
+  const renameKmOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = kmOptions.map(x => (x === prev ? n : x));
+    setKmOptions(next);
+    updateOptionsWithToast('cars', carsKmKey, next, 'تم تعديل الكيلومترات');
+    if (kilometersRange === prev) setKilometersRange(n);
   };
 
   const addCarTypeOption = () => {
     const v = newCarTypeVal.trim();
     if (!v) return;
-    setCarTypeOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = carTypeOptions.includes(v) ? carTypeOptions : [...carTypeOptions, v];
+    setCarTypeOptions(next);
+    updateOptionsWithToast('cars', carsTypeKey, next, 'تم إضافة نوع السيارة');
     setNewCarTypeVal('');
   };
 
   const deleteSelectedCarTypeOption = () => {
     const v = carType;
     if (!v) return;
-    setCarTypeOptions(prev => prev.filter(x => x !== v));
+    const next = carTypeOptions.filter(x => x !== v);
+    setCarTypeOptions(next);
+    updateOptionsWithToast('cars', carsTypeKey, next, 'تم حذف نوع السيارة');
     setCarType('');
+  };
+  const deleteCarTypeOption = (opt: string) => {
+    const next = carTypeOptions.filter(x => x !== opt);
+    setCarTypeOptions(next);
+    updateOptionsWithToast('cars', carsTypeKey, next, 'تم حذف نوع السيارة');
+    if (carType === opt) setCarType('');
+  };
+  const renameCarTypeOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = carTypeOptions.map(x => (x === prev ? n : x));
+    setCarTypeOptions(next);
+    updateOptionsWithToast('cars', carsTypeKey, next, 'تم تعديل نوع السيارة');
+    if (carType === prev) setCarType(n);
   };
 
   const addExteriorColorOption = () => {
     const v = newExteriorColorVal.trim();
     if (!v) return;
-    setExteriorColorOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = exteriorColorOptions.includes(v) ? exteriorColorOptions : [...exteriorColorOptions, v];
+    setExteriorColorOptions(next);
+    updateOptionsWithToast('cars', carsExteriorColorKey, next, 'تم إضافة اللون الخارجي');
     setNewExteriorColorVal('');
   };
 
   const deleteSelectedExteriorColorOption = () => {
     const v = exteriorColor;
     if (!v) return;
-    setExteriorColorOptions(prev => prev.filter(x => x !== v));
+    const next = exteriorColorOptions.filter(x => x !== v);
+    setExteriorColorOptions(next);
+    updateOptionsWithToast('cars', carsExteriorColorKey, next, 'تم حذف اللون الخارجي');
     setExteriorColor('');
+  };
+  const deleteExteriorColorOption = (opt: string) => {
+    const next = exteriorColorOptions.filter(x => x !== opt);
+    setExteriorColorOptions(next);
+    updateOptionsWithToast('cars', carsExteriorColorKey, next, 'تم حذف اللون الخارجي');
+    if (exteriorColor === opt) setExteriorColor('');
+  };
+  const renameExteriorColorOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = exteriorColorOptions.map(x => (x === prev ? n : x));
+    setExteriorColorOptions(next);
+    updateOptionsWithToast('cars', carsExteriorColorKey, next, 'تم تعديل اللون الخارجي');
+    if (exteriorColor === prev) setExteriorColor(n);
   };
 
   const addTransmissionOption = () => {
     const v = newTransmissionVal.trim();
     if (!v) return;
-    setTransmissionOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = transmissionOptions.includes(v) ? transmissionOptions : [...transmissionOptions, v];
+    setTransmissionOptions(next);
+    updateOptionsWithToast('cars', carsTransmissionKey, next, 'تم إضافة نوع الفتيس');
     setNewTransmissionVal('');
   };
 
   const deleteSelectedTransmissionOption = () => {
     const v = transmissionType;
     if (!v) return;
-    setTransmissionOptions(prev => prev.filter(x => x !== v));
+    const next = transmissionOptions.filter(x => x !== v);
+    setTransmissionOptions(next);
+    updateOptionsWithToast('cars', carsTransmissionKey, next, 'تم حذف نوع الفتيس');
     setTransmissionType('');
+  };
+  const deleteTransmissionOption = (opt: string) => {
+    const next = transmissionOptions.filter(x => x !== opt);
+    setTransmissionOptions(next);
+    updateOptionsWithToast('cars', carsTransmissionKey, next, 'تم حذف نوع الفتيس');
+    if (transmissionType === opt) setTransmissionType('');
+  };
+  const renameTransmissionOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = transmissionOptions.map(x => (x === prev ? n : x));
+    setTransmissionOptions(next);
+    updateOptionsWithToast('cars', carsTransmissionKey, next, 'تم تعديل نوع الفتيس');
+    if (transmissionType === prev) setTransmissionType(n);
   };
 
   const addFuelOption = () => {
     const v = newFuelVal.trim();
     if (!v) return;
-    setFuelOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = fuelOptions.includes(v) ? fuelOptions : [...fuelOptions, v];
+    setFuelOptions(next);
+    updateOptionsWithToast('cars', carsFuelKey, next, 'تم إضافة نوع الوقود');
     setNewFuelVal('');
   };
 
   const deleteSelectedFuelOption = () => {
     const v = fuelType;
     if (!v) return;
-    setFuelOptions(prev => prev.filter(x => x !== v));
+    const next = fuelOptions.filter(x => x !== v);
+    setFuelOptions(next);
+    updateOptionsWithToast('cars', carsFuelKey, next, 'تم حذف نوع الوقود');
     setFuelType('');
+  };
+  const deleteFuelOption = (opt: string) => {
+    const next = fuelOptions.filter(x => x !== opt);
+    setFuelOptions(next);
+    updateOptionsWithToast('cars', carsFuelKey, next, 'تم حذف نوع الوقود');
+    if (fuelType === opt) setFuelType('');
+  };
+  const renameFuelOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = fuelOptions.map(x => (x === prev ? n : x));
+    setFuelOptions(next);
+    updateOptionsWithToast('cars', carsFuelKey, next, 'تم تعديل نوع الوقود');
+    if (fuelType === prev) setFuelType(n);
   };
 
   const addTeacherSpecialtyOption = () => {
     const v = newTeacherSpecialtyVal.trim();
     if (!v) return;
-    setTeacherSpecialtyOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = teacherSpecialtyOptions.includes(v) ? teacherSpecialtyOptions : [...teacherSpecialtyOptions, v];
+    setTeacherSpecialtyOptions(next);
+    updateOptionsWithToast('teachers', teacherSpecialtyKey, next, 'تم إضافة التخصص');
     setNewTeacherSpecialtyVal('');
   };
   const deleteSelectedTeacherSpecialtyOption = () => {
     const v = teacherSpecialty;
     if (!v) return;
-    setTeacherSpecialtyOptions(prev => prev.filter(x => x !== v));
+    const next = teacherSpecialtyOptions.filter(x => x !== v);
+    setTeacherSpecialtyOptions(next);
+    updateOptionsWithToast('teachers', teacherSpecialtyKey, next, 'تم حذف التخصص');
     setTeacherSpecialty('');
+  };
+  const deleteTeacherSpecialtyOption = (opt: string) => {
+    const next = teacherSpecialtyOptions.filter(x => x !== opt);
+    setTeacherSpecialtyOptions(next);
+    updateOptionsWithToast('teachers', teacherSpecialtyKey, next, 'تم حذف التخصص');
+    if (teacherSpecialty === opt) setTeacherSpecialty('');
+  };
+  const renameTeacherSpecialtyOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = teacherSpecialtyOptions.map(x => (x === prev ? n : x));
+    setTeacherSpecialtyOptions(next);
+    updateOptionsWithToast('teachers', teacherSpecialtyKey, next, 'تم تعديل التخصص');
+    if (teacherSpecialty === prev) setTeacherSpecialty(n);
   };
   const addDoctorSpecialtyOption = () => {
     const v = newDoctorSpecialtyVal.trim();
     if (!v) return;
-    setDoctorSpecialtyOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = doctorSpecialtyOptions.includes(v) ? doctorSpecialtyOptions : [...doctorSpecialtyOptions, v];
+    setDoctorSpecialtyOptions(next);
+    updateOptionsWithToast('doctors', doctorSpecialtyKey, next, 'تم إضافة التخصص');
     setNewDoctorSpecialtyVal('');
   };
   const deleteSelectedDoctorSpecialtyOption = () => {
     const v = doctorSpecialty;
     if (!v) return;
-    setDoctorSpecialtyOptions(prev => prev.filter(x => x !== v));
+    const next = doctorSpecialtyOptions.filter(x => x !== v);
+    setDoctorSpecialtyOptions(next);
+    updateOptionsWithToast('doctors', doctorSpecialtyKey, next, 'تم حذف التخصص');
     setDoctorSpecialty('');
+  };
+  const deleteDoctorSpecialtyOption = (opt: string) => {
+    const next = doctorSpecialtyOptions.filter(x => x !== opt);
+    setDoctorSpecialtyOptions(next);
+    updateOptionsWithToast('doctors', doctorSpecialtyKey, next, 'تم حذف التخصص');
+    if (doctorSpecialty === opt) setDoctorSpecialty('');
+  };
+  const renameDoctorSpecialtyOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = doctorSpecialtyOptions.map(x => (x === prev ? n : x));
+    setDoctorSpecialtyOptions(next);
+    updateOptionsWithToast('doctors', doctorSpecialtyKey, next, 'تم تعديل التخصص');
+    if (doctorSpecialty === prev) setDoctorSpecialty(n);
   };
   const addJobCategoryOption = () => {
     const v = newJobCategoryVal.trim();
     if (!v) return;
-    setJobCategoryOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = jobCategoryOptions.includes(v) ? jobCategoryOptions : [...jobCategoryOptions, v];
+    setJobCategoryOptions(next);
+    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم إضافة الفئة');
     setNewJobCategoryVal('');
   };
   const deleteSelectedJobCategoryOption = () => {
     const v = jobCategory;
     if (!v) return;
-    setJobCategoryOptions(prev => prev.filter(x => x !== v));
+    const next = jobCategoryOptions.filter(x => x !== v);
+    setJobCategoryOptions(next);
+    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم حذف الفئة');
     setJobCategory('');
+  };
+  const deleteJobCategoryOption = (opt: string) => {
+    const next = jobCategoryOptions.filter(x => x !== opt);
+    setJobCategoryOptions(next);
+    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم حذف الفئة');
+    if (jobCategory === opt) setJobCategory('');
+  };
+  const renameJobCategoryOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = jobCategoryOptions.map(x => (x === prev ? n : x));
+    setJobCategoryOptions(next);
+    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم تعديل الفئة');
+    if (jobCategory === prev) setJobCategory(n);
   };
   const addJobSpecialtyOption = () => {
     const v = newJobSpecialtyVal.trim();
     if (!v) return;
-    setJobSpecialtyOptions(prev => prev.includes(v) ? prev : [...prev, v]);
+    const next = jobSpecialtyOptions.includes(v) ? jobSpecialtyOptions : [...jobSpecialtyOptions, v];
+    setJobSpecialtyOptions(next);
+    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم إضافة التخصص');
     setNewJobSpecialtyVal('');
   };
   const deleteSelectedJobSpecialtyOption = () => {
     const v = jobSpecialty;
     if (!v) return;
-    setJobSpecialtyOptions(prev => prev.filter(x => x !== v));
+    const next = jobSpecialtyOptions.filter(x => x !== v);
+    setJobSpecialtyOptions(next);
+    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم حذف التخصص');
     setJobSpecialty('');
+  };
+  const deleteJobSpecialtyOption = (opt: string) => {
+    const next = jobSpecialtyOptions.filter(x => x !== opt);
+    setJobSpecialtyOptions(next);
+    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم حذف التخصص');
+    if (jobSpecialty === opt) setJobSpecialty('');
+  };
+  const renameJobSpecialtyOption = (prev: string, nextRaw: string) => {
+    const n = nextRaw.trim();
+    if (!n || prev === n) return;
+    const next = jobSpecialtyOptions.map(x => (x === prev ? n : x));
+    setJobSpecialtyOptions(next);
+    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم تعديل التخصص');
+    if (jobSpecialty === prev) setJobSpecialty(n);
   };
   const addFoodMain = () => {
     const name = newFoodMain.trim();
@@ -1622,6 +2172,8 @@ export default function CategoriesPage() {
       if (prev[name]) return prev;
       return { ...prev, [name]: [] };
     });
+    const nextMains = Object.keys(FOOD_MAIN_SUBS).includes(name) ? Object.keys(FOOD_MAIN_SUBS) : [...Object.keys(FOOD_MAIN_SUBS), name];
+    updateOptionsWithToast('food-products', foodMainKey, nextMains, 'تم إضافة الرئيسي');
     setSelectedFoodMain(name);
     setNewFoodMain('');
   };
@@ -1635,6 +2187,8 @@ export default function CategoriesPage() {
       setSelectedFoodMain('');
       setSelectedFoodSub('');
     }
+    const mains = Object.keys(FOOD_MAIN_SUBS).filter(x => x !== name);
+    updateOptionsWithToast('food-products', foodMainKey, mains, 'تم حذف الرئيسي');
   };
   const addFoodSubsBulk = () => {
     if (!selectedFoodMain) return;
@@ -1647,6 +2201,8 @@ export default function CategoriesPage() {
       if (toAdd.length === 0) return prev;
       return { ...prev, [selectedFoodMain]: [...existing, ...toAdd] };
     });
+    const list = (FOOD_MAIN_SUBS[selectedFoodMain] ?? []).concat(tokens.filter(s => !((FOOD_MAIN_SUBS[selectedFoodMain] ?? []).includes(s))));
+    updateOptionsWithToast('food-products', foodSubKey, list, 'تم تحديث الفرعي');
     setSelectedFoodSub('');
     setNewFoodSubsBulk('');
   };
@@ -1657,6 +2213,36 @@ export default function CategoriesPage() {
       return { ...prev, [selectedFoodMain]: list.filter(x => x !== s) };
     });
     if (selectedFoodSub === s) setSelectedFoodSub('');
+    const list = (FOOD_MAIN_SUBS[selectedFoodMain] ?? []).filter(x => x !== s);
+    updateOptionsWithToast('food-products', foodSubKey, list, 'تم حذف الفرعي');
+  };
+  const renameFoodMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setFOOD_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedFoodMain === prevName) setSelectedFoodMain(next);
+    const mains = Object.keys(FOOD_MAIN_SUBS).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('food-products', foodMainKey, mains, 'تم تعديل الرئيسي');
+  };
+  const renameFoodSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedFoodMain) return;
+    setFOOD_MAIN_SUBS(prev => {
+      const list = prev[selectedFoodMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedFoodMain]: updated };
+    });
+    if (selectedFoodSub === prevName) setSelectedFoodSub(next);
+    const updated = (FOOD_MAIN_SUBS[selectedFoodMain] ?? []).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('food-products', foodSubKey, updated, 'تم تعديل الفرعي');
   };
 
   const addRestaurantMain = () => {
@@ -1666,6 +2252,8 @@ export default function CategoriesPage() {
       if (prev[name]) return prev;
       return { ...prev, [name]: [] };
     });
+    const nextMains = Object.keys(RESTAURANTS_MAIN_SUBS).includes(name) ? Object.keys(RESTAURANTS_MAIN_SUBS) : [...Object.keys(RESTAURANTS_MAIN_SUBS), name];
+    updateOptionsWithToast('restaurants', restaurantsMainKey, nextMains, 'تم إضافة الرئيسي');
     setSelectedRestaurantMain(name);
     setNewRestaurantMain('');
   };
@@ -1679,6 +2267,8 @@ export default function CategoriesPage() {
       setSelectedRestaurantMain('');
       setSelectedRestaurantSub('');
     }
+    const mains = Object.keys(RESTAURANTS_MAIN_SUBS).filter(x => x !== name);
+    updateOptionsWithToast('restaurants', restaurantsMainKey, mains, 'تم حذف الرئيسي');
   };
   const addRestaurantSubsBulk = () => {
     if (!selectedRestaurantMain) return;
@@ -1691,6 +2281,8 @@ export default function CategoriesPage() {
       if (toAdd.length === 0) return prev;
       return { ...prev, [selectedRestaurantMain]: [...existing, ...toAdd] };
     });
+    const list = (RESTAURANTS_MAIN_SUBS[selectedRestaurantMain] ?? []).concat(tokens.filter(s => !((RESTAURANTS_MAIN_SUBS[selectedRestaurantMain] ?? []).includes(s))));
+    updateOptionsWithToast('restaurants', restaurantsSubKey, list, 'تم تحديث الفرعي');
     setSelectedRestaurantSub('');
     setNewRestaurantSubsBulk('');
   };
@@ -1701,6 +2293,36 @@ export default function CategoriesPage() {
       return { ...prev, [selectedRestaurantMain]: list.filter(x => x !== s) };
     });
     if (selectedRestaurantSub === s) setSelectedRestaurantSub('');
+    const list = (RESTAURANTS_MAIN_SUBS[selectedRestaurantMain] ?? []).filter(x => x !== s);
+    updateOptionsWithToast('restaurants', restaurantsSubKey, list, 'تم حذف الفرعي');
+  };
+  const renameRestaurantMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setRESTAURANTS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedRestaurantMain === prevName) setSelectedRestaurantMain(next);
+    const mains = Object.keys(RESTAURANTS_MAIN_SUBS).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('restaurants', restaurantsMainKey, mains, 'تم تعديل الرئيسي');
+  };
+  const renameRestaurantSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedRestaurantMain) return;
+    setRESTAURANTS_MAIN_SUBS(prev => {
+      const list = prev[selectedRestaurantMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedRestaurantMain]: updated };
+    });
+    if (selectedRestaurantSub === prevName) setSelectedRestaurantSub(next);
+    const updated = (RESTAURANTS_MAIN_SUBS[selectedRestaurantMain] ?? []).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('restaurants', restaurantsSubKey, updated, 'تم تعديل الفرعي');
   };
 
   const addStoreMain = () => {
@@ -1710,6 +2332,8 @@ export default function CategoriesPage() {
       if (prev[name]) return prev;
       return { ...prev, [name]: [] };
     });
+    const nextMains = Object.keys(STORES_MAIN_SUBS).includes(name) ? Object.keys(STORES_MAIN_SUBS) : [...Object.keys(STORES_MAIN_SUBS), name];
+    updateOptionsWithToast('stores', storesMainKey, nextMains, 'تم إضافة الرئيسي');
     setSelectedStoreMain(name);
     setNewStoreMain('');
   };
@@ -1723,6 +2347,8 @@ export default function CategoriesPage() {
       setSelectedStoreMain('');
       setSelectedStoreSub('');
     }
+    const mains = Object.keys(STORES_MAIN_SUBS).filter(x => x !== name);
+    updateOptionsWithToast('stores', storesMainKey, mains, 'تم حذف الرئيسي');
   };
   const addStoreSubsBulk = () => {
     if (!selectedStoreMain) return;
@@ -1735,6 +2361,8 @@ export default function CategoriesPage() {
       if (toAdd.length === 0) return prev;
       return { ...prev, [selectedStoreMain]: [...existing, ...toAdd] };
     });
+    const list = (STORES_MAIN_SUBS[selectedStoreMain] ?? []).concat(tokens.filter(s => !((STORES_MAIN_SUBS[selectedStoreMain] ?? []).includes(s))));
+    updateOptionsWithToast('stores', storesSubKey, list, 'تم تحديث الفرعي');
     setSelectedStoreSub('');
     setNewStoreSubsBulk('');
   };
@@ -1745,6 +2373,36 @@ export default function CategoriesPage() {
       return { ...prev, [selectedStoreMain]: list.filter(x => x !== s) };
     });
     if (selectedStoreSub === s) setSelectedStoreSub('');
+    const list = (STORES_MAIN_SUBS[selectedStoreMain] ?? []).filter(x => x !== s);
+    updateOptionsWithToast('stores', storesSubKey, list, 'تم حذف الفرعي');
+  };
+  const renameStoreMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setSTORES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedStoreMain === prevName) setSelectedStoreMain(next);
+    const mains = Object.keys(STORES_MAIN_SUBS).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('stores', storesMainKey, mains, 'تم تعديل الرئيسي');
+  };
+  const renameStoreSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedStoreMain) return;
+    setSTORES_MAIN_SUBS(prev => {
+      const list = prev[selectedStoreMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedStoreMain]: updated };
+    });
+    if (selectedStoreSub === prevName) setSelectedStoreSub(next);
+    const updated = (STORES_MAIN_SUBS[selectedStoreMain] ?? []).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('stores', storesSubKey, updated, 'تم تعديل الفرعي');
   };
 
   const addGroceryMain = () => {
@@ -1754,6 +2412,8 @@ export default function CategoriesPage() {
       if (prev[name]) return prev;
       return { ...prev, [name]: [] };
     });
+    const nextMains = Object.keys(GROCERIES_MAIN_SUBS).includes(name) ? Object.keys(GROCERIES_MAIN_SUBS) : [...Object.keys(GROCERIES_MAIN_SUBS), name];
+    updateOptionsWithToast('groceries', groceriesMainKey, nextMains, 'تم إضافة الرئيسي');
     setSelectedGroceryMain(name);
     setNewGroceryMain('');
   };
@@ -1767,6 +2427,8 @@ export default function CategoriesPage() {
       setSelectedGroceryMain('');
       setSelectedGrocerySub('');
     }
+    const mains = Object.keys(GROCERIES_MAIN_SUBS).filter(x => x !== name);
+    updateOptionsWithToast('groceries', groceriesMainKey, mains, 'تم حذف الرئيسي');
   };
   const addGrocerySubsBulk = () => {
     if (!selectedGroceryMain) return;
@@ -1779,6 +2441,8 @@ export default function CategoriesPage() {
       if (toAdd.length === 0) return prev;
       return { ...prev, [selectedGroceryMain]: [...existing, ...toAdd] };
     });
+    const list = (GROCERIES_MAIN_SUBS[selectedGroceryMain] ?? []).concat(tokens.filter(s => !((GROCERIES_MAIN_SUBS[selectedGroceryMain] ?? []).includes(s))));
+    updateOptionsWithToast('groceries', groceriesSubKey, list, 'تم تحديث الفرعي');
     setSelectedGrocerySub('');
     setNewGrocerySubsBulk('');
   };
@@ -1789,6 +2453,36 @@ export default function CategoriesPage() {
       return { ...prev, [selectedGroceryMain]: list.filter(x => x !== s) };
     });
     if (selectedGrocerySub === s) setSelectedGrocerySub('');
+    const list = (GROCERIES_MAIN_SUBS[selectedGroceryMain] ?? []).filter(x => x !== s);
+    updateOptionsWithToast('groceries', groceriesSubKey, list, 'تم حذف الفرعي');
+  };
+  const renameGroceryMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setGROCERIES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedGroceryMain === prevName) setSelectedGroceryMain(next);
+    const mains = Object.keys(GROCERIES_MAIN_SUBS).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('groceries', groceriesMainKey, mains, 'تم تعديل الرئيسي');
+  };
+  const renameGrocerySub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedGroceryMain) return;
+    setGROCERIES_MAIN_SUBS(prev => {
+      const list = prev[selectedGroceryMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedGroceryMain]: updated };
+    });
+    if (selectedGrocerySub === prevName) setSelectedGrocerySub(next);
+    const updated = (GROCERIES_MAIN_SUBS[selectedGroceryMain] ?? []).map(x => (x === prevName ? next : x));
+    updateOptionsWithToast('groceries', groceriesSubKey, updated, 'تم تعديل الفرعي');
   };
 
   const addHomeServiceMain = () => {
@@ -1834,6 +2528,32 @@ export default function CategoriesPage() {
     });
     if (selectedHomeServiceSub === s) setSelectedHomeServiceSub('');
   };
+  const renameHomeServiceMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setHOME_SERVICES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedHomeServiceMain === prevName) setSelectedHomeServiceMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameHomeServiceSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedHomeServiceMain) return;
+    setHOME_SERVICES_MAIN_SUBS(prev => {
+      const list = prev[selectedHomeServiceMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedHomeServiceMain]: updated };
+    });
+    if (selectedHomeServiceSub === prevName) setSelectedHomeServiceSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addFurnitureMain = () => {
     const name = newFurnitureMain.trim();
@@ -1877,6 +2597,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedFurnitureMain]: list.filter(x => x !== s) };
     });
     if (selectedFurnitureSub === s) setSelectedFurnitureSub('');
+  };
+  const renameFurnitureMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setFURNITURE_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedFurnitureMain === prevName) setSelectedFurnitureMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameFurnitureSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedFurnitureMain) return;
+    setFURNITURE_MAIN_SUBS(prev => {
+      const list = prev[selectedFurnitureMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedFurnitureMain]: updated };
+    });
+    if (selectedFurnitureSub === prevName) setSelectedFurnitureSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addHouseholdToolMain = () => {
@@ -1922,6 +2668,32 @@ export default function CategoriesPage() {
     });
     if (selectedHouseholdToolSub === s) setSelectedHouseholdToolSub('');
   };
+  const renameHouseholdToolMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setHOUSEHOLD_TOOLS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedHouseholdToolMain === prevName) setSelectedHouseholdToolMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameHouseholdToolSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedHouseholdToolMain) return;
+    setHOUSEHOLD_TOOLS_MAIN_SUBS(prev => {
+      const list = prev[selectedHouseholdToolMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedHouseholdToolMain]: updated };
+    });
+    if (selectedHouseholdToolSub === prevName) setSelectedHouseholdToolSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addHomeApplianceMain = () => {
     const name = newHomeApplianceMain.trim();
@@ -1965,6 +2737,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedHomeApplianceMain]: list.filter(x => x !== s) };
     });
     if (selectedHomeApplianceSub === s) setSelectedHomeApplianceSub('');
+  };
+  const renameHomeApplianceMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setHOME_APPLIANCES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedHomeApplianceMain === prevName) setSelectedHomeApplianceMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameHomeApplianceSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedHomeApplianceMain) return;
+    setHOME_APPLIANCES_MAIN_SUBS(prev => {
+      const list = prev[selectedHomeApplianceMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedHomeApplianceMain]: updated };
+    });
+    if (selectedHomeApplianceSub === prevName) setSelectedHomeApplianceSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addElectronicsMain = () => {
@@ -2010,6 +2808,32 @@ export default function CategoriesPage() {
     });
     if (selectedElectronicsSub === s) setSelectedElectronicsSub('');
   };
+  const renameElectronicsMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setELECTRONICS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedElectronicsMain === prevName) setSelectedElectronicsMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameElectronicsSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedElectronicsMain) return;
+    setELECTRONICS_MAIN_SUBS(prev => {
+      const list = prev[selectedElectronicsMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedElectronicsMain]: updated };
+    });
+    if (selectedElectronicsSub === prevName) setSelectedElectronicsSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addHealthMain = () => {
     const name = newHealthMain.trim();
@@ -2053,6 +2877,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedHealthMain]: list.filter(x => x !== s) };
     });
     if (selectedHealthSub === s) setSelectedHealthSub('');
+  };
+  const renameHealthMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setHEALTH_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedHealthMain === prevName) setSelectedHealthMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameHealthSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedHealthMain) return;
+    setHEALTH_MAIN_SUBS(prev => {
+      const list = prev[selectedHealthMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedHealthMain]: updated };
+    });
+    if (selectedHealthSub === prevName) setSelectedHealthSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addEducationMain = () => {
@@ -2100,6 +2950,32 @@ export default function CategoriesPage() {
     if (selectedEducationSub === s) setSelectedEducationSub('');
     showToast('تم حذف الفرعي', 'info');
   };
+  const renameEducationMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setEDUCATION_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedEducationMain === prevName) setSelectedEducationMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameEducationSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedEducationMain) return;
+    setEDUCATION_MAIN_SUBS(prev => {
+      const list = prev[selectedEducationMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedEducationMain]: updated };
+    });
+    if (selectedEducationSub === prevName) setSelectedEducationSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addShippingMain = () => {
     const name = newShippingMain.trim();
@@ -2143,6 +3019,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedShippingMain]: list.filter(x => x !== s) };
     });
     if (selectedShippingSub === s) setSelectedShippingSub('');
+  };
+  const renameShippingMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setSHIPPING_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedShippingMain === prevName) setSelectedShippingMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameShippingSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedShippingMain) return;
+    setSHIPPING_MAIN_SUBS(prev => {
+      const list = prev[selectedShippingMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedShippingMain]: updated };
+    });
+    if (selectedShippingSub === prevName) setSelectedShippingSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addMensClothingShoesMain = () => {
@@ -2188,6 +3090,32 @@ export default function CategoriesPage() {
     });
     if (selectedMensClothingShoesSub === s) setSelectedMensClothingShoesSub('');
   };
+  const renameMensClothingShoesMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setMENS_CLOTHING_SHOES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedMensClothingShoesMain === prevName) setSelectedMensClothingShoesMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameMensClothingShoesSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedMensClothingShoesMain) return;
+    setMENS_CLOTHING_SHOES_MAIN_SUBS(prev => {
+      const list = prev[selectedMensClothingShoesMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedMensClothingShoesMain]: updated };
+    });
+    if (selectedMensClothingShoesSub === prevName) setSelectedMensClothingShoesSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addHeavyEquipmentMain = () => {
     const name = newHeavyEquipmentMain.trim();
@@ -2231,6 +3159,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedHeavyEquipmentMain]: list.filter(x => x !== s) };
     });
     if (selectedHeavyEquipmentSub === s) setSelectedHeavyEquipmentSub('');
+  };
+  const renameHeavyEquipmentMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setHEAVY_EQUIPMENT_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedHeavyEquipmentMain === prevName) setSelectedHeavyEquipmentMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameHeavyEquipmentSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedHeavyEquipmentMain) return;
+    setHEAVY_EQUIPMENT_MAIN_SUBS(prev => {
+      const list = prev[selectedHeavyEquipmentMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedHeavyEquipmentMain]: updated };
+    });
+    if (selectedHeavyEquipmentSub === prevName) setSelectedHeavyEquipmentSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addKidsSuppliesToysMain = () => {
@@ -2277,6 +3231,32 @@ export default function CategoriesPage() {
     if (selectedKidsSuppliesToysSub === s) setSelectedKidsSuppliesToysSub('');
   };
 
+  const renameKidsSuppliesToysMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setKIDS_SUPPLIES_TOYS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedKidsSuppliesToysMain === prevName) setSelectedKidsSuppliesToysMain(next);
+  };
+
+  const renameKidsSuppliesToysSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedKidsSuppliesToysMain) return;
+    setKIDS_SUPPLIES_TOYS_MAIN_SUBS(prev => {
+      const list = prev[selectedKidsSuppliesToysMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedKidsSuppliesToysMain]: updated };
+    });
+    if (selectedKidsSuppliesToysSub === prevName) setSelectedKidsSuppliesToysSub(next);
+  };
+
   const addFreelanceServicesMain = () => {
     const name = newFreelanceServicesMain.trim();
     if (!name) return;
@@ -2319,6 +3299,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedFreelanceServicesMain]: list.filter(x => x !== s) };
     });
     if (selectedFreelanceServicesSub === s) setSelectedFreelanceServicesSub('');
+  };
+  const renameFreelanceServicesMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setFREELANCE_SERVICES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedFreelanceServicesMain === prevName) setSelectedFreelanceServicesMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameFreelanceServicesSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedFreelanceServicesMain) return;
+    setFREELANCE_SERVICES_MAIN_SUBS(prev => {
+      const list = prev[selectedFreelanceServicesMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedFreelanceServicesMain]: updated };
+    });
+    if (selectedFreelanceServicesSub === prevName) setSelectedFreelanceServicesSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addWatchesJewelryMain = () => {
@@ -2364,6 +3370,32 @@ export default function CategoriesPage() {
     });
     if (selectedWatchesJewelrySub === s) setSelectedWatchesJewelrySub('');
   };
+  const renameWatchesJewelryMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setWATCHES_JEWELRY_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedWatchesJewelryMain === prevName) setSelectedWatchesJewelryMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameWatchesJewelrySub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedWatchesJewelryMain) return;
+    setWATCHES_JEWELRY_MAIN_SUBS(prev => {
+      const list = prev[selectedWatchesJewelryMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedWatchesJewelryMain]: updated };
+    });
+    if (selectedWatchesJewelrySub === prevName) setSelectedWatchesJewelrySub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addCarServicesMain = () => {
     const name = newCarServicesMain.trim();
@@ -2407,6 +3439,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedCarServicesMain]: list.filter(x => x !== s) };
     });
     if (selectedCarServicesSub === s) setSelectedCarServicesSub('');
+  };
+  const renameCarServicesMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setCAR_SERVICES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedCarServicesMain === prevName) setSelectedCarServicesMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameCarServicesSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedCarServicesMain) return;
+    setCAR_SERVICES_MAIN_SUBS(prev => {
+      const list = prev[selectedCarServicesMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedCarServicesMain]: updated };
+    });
+    if (selectedCarServicesSub === prevName) setSelectedCarServicesSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addGeneralMaintenanceMain = () => {
@@ -2452,6 +3510,32 @@ export default function CategoriesPage() {
     });
     if (selectedGeneralMaintenanceSub === s) setSelectedGeneralMaintenanceSub('');
   };
+  const renameGeneralMaintenanceMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setGENERAL_MAINTENANCE_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedGeneralMaintenanceMain === prevName) setSelectedGeneralMaintenanceMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameGeneralMaintenanceSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedGeneralMaintenanceMain) return;
+    setGENERAL_MAINTENANCE_MAIN_SUBS(prev => {
+      const list = prev[selectedGeneralMaintenanceMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedGeneralMaintenanceMain]: updated };
+    });
+    if (selectedGeneralMaintenanceSub === prevName) setSelectedGeneralMaintenanceSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addConstructionToolsMain = () => {
     const name = newConstructionToolsMain.trim();
@@ -2495,6 +3579,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedConstructionToolsMain]: list.filter(x => x !== s) };
     });
     if (selectedConstructionToolsSub === s) setSelectedConstructionToolsSub('');
+  };
+  const renameConstructionToolsMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setCONSTRUCTION_TOOLS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedConstructionToolsMain === prevName) setSelectedConstructionToolsMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameConstructionToolsSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedConstructionToolsMain) return;
+    setCONSTRUCTION_TOOLS_MAIN_SUBS(prev => {
+      const list = prev[selectedConstructionToolsMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedConstructionToolsMain]: updated };
+    });
+    if (selectedConstructionToolsSub === prevName) setSelectedConstructionToolsSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addGymsMain = () => {
@@ -2540,6 +3650,32 @@ export default function CategoriesPage() {
     });
     if (selectedGymsSub === s) setSelectedGymsSub('');
   };
+  const renameGymsMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setGYMS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedGymsMain === prevName) setSelectedGymsMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameGymsSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedGymsMain) return;
+    setGYMS_MAIN_SUBS(prev => {
+      const list = prev[selectedGymsMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedGymsMain]: updated };
+    });
+    if (selectedGymsSub === prevName) setSelectedGymsSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addBikesLightVehiclesMain = () => {
     const name = newBikesLightVehiclesMain.trim();
@@ -2583,6 +3719,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedBikesLightVehiclesMain]: list.filter(x => x !== s) };
     });
     if (selectedBikesLightVehiclesSub === s) setSelectedBikesLightVehiclesSub('');
+  };
+  const renameBikesLightVehiclesMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setBIKES_LIGHT_VEHICLES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedBikesLightVehiclesMain === prevName) setSelectedBikesLightVehiclesMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameBikesLightVehiclesSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedBikesLightVehiclesMain) return;
+    setBIKES_LIGHT_VEHICLES_MAIN_SUBS(prev => {
+      const list = prev[selectedBikesLightVehiclesMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedBikesLightVehiclesMain]: updated };
+    });
+    if (selectedBikesLightVehiclesSub === prevName) setSelectedBikesLightVehiclesSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addMaterialsProductionLinesMain = () => {
@@ -2628,6 +3790,32 @@ export default function CategoriesPage() {
     });
     if (selectedMaterialsProductionLinesSub === s) setSelectedMaterialsProductionLinesSub('');
   };
+  const renameMaterialsProductionLinesMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setMATERIALS_PRODUCTION_LINES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedMaterialsProductionLinesMain === prevName) setSelectedMaterialsProductionLinesMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameMaterialsProductionLinesSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedMaterialsProductionLinesMain) return;
+    setMATERIALS_PRODUCTION_LINES_MAIN_SUBS(prev => {
+      const list = prev[selectedMaterialsProductionLinesMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedMaterialsProductionLinesMain]: updated };
+    });
+    if (selectedMaterialsProductionLinesSub === prevName) setSelectedMaterialsProductionLinesSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addFarmsFactoriesProductsMain = () => {
     const name = newFarmsFactoriesProductsMain.trim();
@@ -2671,6 +3859,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedFarmsFactoriesProductsMain]: list.filter(x => x !== s) };
     });
     if (selectedFarmsFactoriesProductsSub === s) setSelectedFarmsFactoriesProductsSub('');
+  };
+  const renameFarmsFactoriesProductsMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setFARMS_FACTORIES_PRODUCTS_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedFarmsFactoriesProductsMain === prevName) setSelectedFarmsFactoriesProductsMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameFarmsFactoriesProductsSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedFarmsFactoriesProductsMain) return;
+    setFARMS_FACTORIES_PRODUCTS_MAIN_SUBS(prev => {
+      const list = prev[selectedFarmsFactoriesProductsMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedFarmsFactoriesProductsMain]: updated };
+    });
+    if (selectedFarmsFactoriesProductsSub === prevName) setSelectedFarmsFactoriesProductsSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addLightingDecorMain = () => {
@@ -2716,6 +3930,32 @@ export default function CategoriesPage() {
     });
     if (selectedLightingDecorSub === s) setSelectedLightingDecorSub('');
   };
+  const renameLightingDecorMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setLIGHTING_DECOR_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedLightingDecorMain === prevName) setSelectedLightingDecorMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameLightingDecorSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedLightingDecorMain) return;
+    setLIGHTING_DECOR_MAIN_SUBS(prev => {
+      const list = prev[selectedLightingDecorMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedLightingDecorMain]: updated };
+    });
+    if (selectedLightingDecorSub === prevName) setSelectedLightingDecorSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addMissingMain = () => {
     const name = newMissingMain.trim();
@@ -2759,6 +3999,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedMissingMain]: list.filter(x => x !== s) };
     });
     if (selectedMissingSub === s) setSelectedMissingSub('');
+  };
+  const renameMissingMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setMISSING_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedMissingMain === prevName) setSelectedMissingMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameMissingSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedMissingMain) return;
+    setMISSING_MAIN_SUBS(prev => {
+      const list = prev[selectedMissingMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedMissingMain]: updated };
+    });
+    if (selectedMissingSub === prevName) setSelectedMissingSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   const addToolsSuppliesMain = () => {
@@ -2804,6 +4070,32 @@ export default function CategoriesPage() {
     });
     if (selectedToolsSuppliesSub === s) setSelectedToolsSuppliesSub('');
   };
+  const renameToolsSuppliesMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setTOOLS_SUPPLIES_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedToolsSuppliesMain === prevName) setSelectedToolsSuppliesMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameToolsSuppliesSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedToolsSuppliesMain) return;
+    setTOOLS_SUPPLIES_MAIN_SUBS(prev => {
+      const list = prev[selectedToolsSuppliesMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedToolsSuppliesMain]: updated };
+    });
+    if (selectedToolsSuppliesSub === prevName) setSelectedToolsSuppliesSub(next);
+    showToast('تم تعديل الفرعي', 'success');
+  };
 
   const addWholesaleMain = () => {
     const name = newWholesaleMain.trim();
@@ -2847,6 +4139,32 @@ export default function CategoriesPage() {
       return { ...prev, [selectedWholesaleMain]: list.filter(x => x !== s) };
     });
     if (selectedWholesaleSub === s) setSelectedWholesaleSub('');
+  };
+  const renameWholesaleMain = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next) return;
+    setWHOLESALE_MAIN_SUBS(prev => {
+      if (prev[next]) return prev;
+      const n = { ...prev };
+      const list = n[prevName] ?? [];
+      delete n[prevName];
+      n[next] = list;
+      return n;
+    });
+    if (selectedWholesaleMain === prevName) setSelectedWholesaleMain(next);
+    showToast('تم تعديل الرئيسي', 'success');
+  };
+  const renameWholesaleSub = (prevName: string, nextRaw: string) => {
+    const next = nextRaw.trim();
+    if (!next || prevName === next || !selectedWholesaleMain) return;
+    setWHOLESALE_MAIN_SUBS(prev => {
+      const list = prev[selectedWholesaleMain] ?? [];
+      if (list.includes(next)) return prev;
+      const updated = list.map(x => (x === prevName ? next : x));
+      return { ...prev, [selectedWholesaleMain]: updated };
+    });
+    if (selectedWholesaleSub === prevName) setSelectedWholesaleSub(next);
+    showToast('تم تعديل الفرعي', 'success');
   };
 
   // فتح نافذة إدارة خيارات الحقل
@@ -3201,7 +4519,8 @@ export default function CategoriesPage() {
                               options={yearOptions}
                               value={manufactureYear}
                               onChange={(v) => setManufactureYear(v)}
-                              onDelete={(opt) => { setYearOptions(prev => prev.filter(x => x !== opt)); if (manufactureYear === opt) setManufactureYear(''); }}
+                              onDelete={(opt) => deleteYearOption(opt)}
+                              onEdit={(prev, next) => renameYearOption(prev, next)}
                               placeholder="اختر السنة"
                             />
                             <div className="inline-actions">
@@ -3221,7 +4540,8 @@ export default function CategoriesPage() {
                               options={kmOptions}
                               value={kilometersRange}
                               onChange={(v) => setKilometersRange(v)}
-                              onDelete={(opt) => { setKmOptions(prev => prev.filter(x => x !== opt)); if (kilometersRange === opt) setKilometersRange(''); }}
+                              onDelete={(opt) => deleteKmOption(opt)}
+                              onEdit={(prev, next) => renameKmOption(prev, next)}
                               placeholder="اختر الكيلو متر"
                             />
                             <div className="inline-actions">
@@ -3241,7 +4561,8 @@ export default function CategoriesPage() {
                               options={carTypeOptions}
                               value={carType}
                               onChange={(v) => setCarType(v)}
-                              onDelete={(opt) => { setCarTypeOptions(prev => prev.filter(x => x !== opt)); if (carType === opt) setCarType(''); }}
+                              onDelete={(opt) => deleteCarTypeOption(opt)}
+                              onEdit={(prev, next) => renameCarTypeOption(prev, next)}
                               placeholder="اختر النوع"
                             />
                             <div className="inline-actions">
@@ -3261,7 +4582,8 @@ export default function CategoriesPage() {
                               options={exteriorColorOptions}
                               value={exteriorColor}
                               onChange={(v) => setExteriorColor(v)}
-                              onDelete={(opt) => { setExteriorColorOptions(prev => prev.filter(x => x !== opt)); if (exteriorColor === opt) setExteriorColor(''); }}
+                              onDelete={(opt) => deleteExteriorColorOption(opt)}
+                              onEdit={(prev, next) => renameExteriorColorOption(prev, next)}
                               placeholder="اختر اللون الخارجي"
                             />
                             <div className="inline-actions">
@@ -3281,7 +4603,8 @@ export default function CategoriesPage() {
                               options={transmissionOptions}
                               value={transmissionType}
                               onChange={(v) => setTransmissionType(v)}
-                              onDelete={(opt) => { setTransmissionOptions(prev => prev.filter(x => x !== opt)); if (transmissionType === opt) setTransmissionType(''); }}
+                              onDelete={(opt) => deleteTransmissionOption(opt)}
+                              onEdit={(prev, next) => renameTransmissionOption(prev, next)}
                               placeholder="اختر الفتيس"
                             />
                             <div className="inline-actions">
@@ -3301,7 +4624,8 @@ export default function CategoriesPage() {
                               options={fuelOptions}
                               value={fuelType}
                               onChange={(v) => setFuelType(v)}
-                              onDelete={(opt) => { setFuelOptions(prev => prev.filter(x => x !== opt)); if (fuelType === opt) setFuelType(''); }}
+                              onDelete={(opt) => deleteFuelOption(opt)}
+                              onEdit={(prev, next) => renameFuelOption(prev, next)}
                               placeholder="اختر نوع الوقود"
                             />
                             <div className="inline-actions">
@@ -3328,7 +4652,8 @@ export default function CategoriesPage() {
                               options={teacherSpecialtyOptions}
                               value={teacherSpecialty}
                               onChange={(v) => setTeacherSpecialty(v)}
-                              onDelete={(opt) => { setTeacherSpecialtyOptions(prev => prev.filter(x => x !== opt)); if (teacherSpecialty === opt) setTeacherSpecialty(''); }}
+                              onDelete={(opt) => deleteTeacherSpecialtyOption(opt)}
+                              onEdit={(prev, next) => renameTeacherSpecialtyOption(prev, next)}
                               placeholder="اختر التخصص"
                             />
                             <div className="inline-actions">
@@ -3355,7 +4680,8 @@ export default function CategoriesPage() {
                               options={doctorSpecialtyOptions}
                               value={doctorSpecialty}
                               onChange={(v) => setDoctorSpecialty(v)}
-                              onDelete={(opt) => { setDoctorSpecialtyOptions(prev => prev.filter(x => x !== opt)); if (doctorSpecialty === opt) setDoctorSpecialty(''); }}
+                              onDelete={(opt) => deleteDoctorSpecialtyOption(opt)}
+                              onEdit={(prev, next) => renameDoctorSpecialtyOption(prev, next)}
                               placeholder="اختر التخصص"
                             />
                             <div className="inline-actions">
@@ -3382,7 +4708,8 @@ export default function CategoriesPage() {
                               options={jobCategoryOptions}
                               value={jobCategory}
                               onChange={(v) => setJobCategory(v)}
-                              onDelete={(opt) => { setJobCategoryOptions(prev => prev.filter(x => x !== opt)); if (jobCategory === opt) setJobCategory(''); }}
+                              onDelete={(opt) => deleteJobCategoryOption(opt)}
+                              onEdit={(prev, next) => renameJobCategoryOption(prev, next)}
                               placeholder="اختر التصنيف"
                             />
                             <div className="inline-actions">
@@ -3402,7 +4729,8 @@ export default function CategoriesPage() {
                               options={jobSpecialtyOptions}
                               value={jobSpecialty}
                               onChange={(v) => setJobSpecialty(v)}
-                              onDelete={(opt) => { setJobSpecialtyOptions(prev => prev.filter(x => x !== opt)); if (jobSpecialty === opt) setJobSpecialty(''); }}
+                              onDelete={(opt) => deleteJobSpecialtyOption(opt)}
+                              onEdit={(prev, next) => renameJobSpecialtyOption(prev, next)}
                               placeholder="اختر التخصص"
                             />
                             <div className="inline-actions">
@@ -3425,16 +4753,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(FOOD_MAIN_SUBS)}
                               value={selectedFoodMain}
-                              onChange={(e) => { setSelectedFoodMain(e.target.value); setSelectedFoodSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(FOOD_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedFoodMain(v); setSelectedFoodSub(''); }}
+                              onDelete={(opt) => removeFoodMain(opt)}
+                              onEdit={(prev, next) => renameFoodMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3444,24 +4770,19 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewFoodMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addFoodMain}>إضافة</button>
-                              {selectedFoodMain && (
-                                <button className="btn-delete" onClick={() => removeFoodMain(selectedFoodMain)}>حذف الرئيسي</button>
-                              )}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={foodSubs}
                               value={selectedFoodSub}
-                              onChange={(e) => setSelectedFoodSub(e.target.value)}
+                              onChange={(v) => setSelectedFoodSub(v)}
+                              onDelete={(opt) => removeFoodSub(opt)}
+                              onEdit={(prev, next) => renameFoodSub(prev, next)}
                               disabled={!selectedFoodMain}
-                            >
-                              <option value="">{selectedFoodMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {foodSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedFoodMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3491,16 +4812,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(RESTAURANTS_MAIN_SUBS)}
                               value={selectedRestaurantMain}
-                              onChange={(e) => { setSelectedRestaurantMain(e.target.value); setSelectedRestaurantSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(RESTAURANTS_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedRestaurantMain(v); setSelectedRestaurantSub(''); }}
+                              onDelete={(opt) => removeRestaurantMain(opt)}
+                              onEdit={(prev, next) => renameRestaurantMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3510,24 +4829,19 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewRestaurantMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addRestaurantMain}>إضافة</button>
-                              {selectedRestaurantMain && (
-                                <button className="btn-delete" onClick={() => removeRestaurantMain(selectedRestaurantMain)}>حذف الرئيسي</button>
-                              )}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={restaurantSubs}
                               value={selectedRestaurantSub}
-                              onChange={(e) => setSelectedRestaurantSub(e.target.value)}
+                              onChange={(v) => setSelectedRestaurantSub(v)}
+                              onDelete={(opt) => removeRestaurantSub(opt)}
+                              onEdit={(prev, next) => renameRestaurantSub(prev, next)}
                               disabled={!selectedRestaurantMain}
-                            >
-                              <option value="">{selectedRestaurantMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {restaurantSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedRestaurantMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3557,16 +4871,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(STORES_MAIN_SUBS)}
                               value={selectedStoreMain}
-                              onChange={(e) => { setSelectedStoreMain(e.target.value); setSelectedStoreSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(STORES_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedStoreMain(v); setSelectedStoreSub(''); }}
+                              onDelete={(opt) => removeStoreMain(opt)}
+                              onEdit={(prev, next) => renameStoreMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3576,24 +4888,19 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewStoreMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addStoreMain}>إضافة</button>
-                              {selectedStoreMain && (
-                                <button className="btn-delete" onClick={() => removeStoreMain(selectedStoreMain)}>حذف الرئيسي</button>
-                              )}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={storeSubs}
                               value={selectedStoreSub}
-                              onChange={(e) => setSelectedStoreSub(e.target.value)}
+                              onChange={(v) => setSelectedStoreSub(v)}
+                              onDelete={(opt) => removeStoreSub(opt)}
+                              onEdit={(prev, next) => renameStoreSub(prev, next)}
                               disabled={!selectedStoreMain}
-                            >
-                              <option value="">{selectedStoreMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {storeSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedStoreMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3623,16 +4930,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(GROCERIES_MAIN_SUBS)}
                               value={selectedGroceryMain}
-                              onChange={(e) => { setSelectedGroceryMain(e.target.value); setSelectedGrocerySub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(GROCERIES_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedGroceryMain(v); setSelectedGrocerySub(''); }}
+                              onDelete={(opt) => removeGroceryMain(opt)}
+                              onEdit={(prev, next) => renameGroceryMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3642,24 +4947,19 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewGroceryMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addGroceryMain}>إضافة</button>
-                              {selectedGroceryMain && (
-                                <button className="btn-delete" onClick={() => removeGroceryMain(selectedGroceryMain)}>حذف الرئيسي</button>
-                              )}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={grocerySubs}
                               value={selectedGrocerySub}
-                              onChange={(e) => setSelectedGrocerySub(e.target.value)}
+                              onChange={(v) => setSelectedGrocerySub(v)}
+                              onDelete={(opt) => removeGrocerySub(opt)}
+                              onEdit={(prev, next) => renameGrocerySub(prev, next)}
                               disabled={!selectedGroceryMain}
-                            >
-                              <option value="">{selectedGroceryMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {grocerySubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedGroceryMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3689,16 +4989,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(HOME_SERVICES_MAIN_SUBS)}
                               value={selectedHomeServiceMain}
-                              onChange={(e) => { setSelectedHomeServiceMain(e.target.value); setSelectedHomeServiceSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(HOME_SERVICES_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedHomeServiceMain(v); setSelectedHomeServiceSub(''); }}
+                              onDelete={(opt) => removeHomeServiceMain(opt)}
+                              onEdit={(prev, next) => renameHomeServiceMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3708,24 +5006,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewHomeServiceMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addHomeServiceMain}>إضافة</button>
-                              {selectedHomeServiceMain && (
+                            {/*  {selectedHomeServiceMain && (
                                 <button className="btn-delete" onClick={() => removeHomeServiceMain(selectedHomeServiceMain)}>حذف الرئيسي</button>
-                              )}
+                              )}*/}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={homeServiceSubs}
                               value={selectedHomeServiceSub}
-                              onChange={(e) => setSelectedHomeServiceSub(e.target.value)}
+                              onChange={(v) => setSelectedHomeServiceSub(v)}
+                              onDelete={(opt) => removeHomeServiceSub(opt)}
+                              onEdit={(prev, next) => renameHomeServiceSub(prev, next)}
                               disabled={!selectedHomeServiceMain}
-                            >
-                              <option value="">{selectedHomeServiceMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {homeServiceSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedHomeServiceMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3755,16 +5051,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(FURNITURE_MAIN_SUBS)}
                               value={selectedFurnitureMain}
-                              onChange={(e) => { setSelectedFurnitureMain(e.target.value); setSelectedFurnitureSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(FURNITURE_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedFurnitureMain(v); setSelectedFurnitureSub(''); }}
+                              onDelete={(opt) => removeFurnitureMain(opt)}
+                              onEdit={(prev, next) => renameFurnitureMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3774,24 +5068,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewFurnitureMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addFurnitureMain}>إضافة</button>
-                              {selectedFurnitureMain && (
+                              {/* {selectedFurnitureMain && (
                                 <button className="btn-delete" onClick={() => removeFurnitureMain(selectedFurnitureMain)}>حذف الرئيسي</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={furnitureSubs}
                               value={selectedFurnitureSub}
-                              onChange={(e) => setSelectedFurnitureSub(e.target.value)}
+                              onChange={(v) => setSelectedFurnitureSub(v)}
+                              onDelete={(opt) => removeFurnitureSub(opt)}
+                              onEdit={(prev, next) => renameFurnitureSub(prev, next)}
                               disabled={!selectedFurnitureMain}
-                            >
-                              <option value="">{selectedFurnitureMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {furnitureSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedFurnitureMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3821,16 +5113,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(HOUSEHOLD_TOOLS_MAIN_SUBS)}
                               value={selectedHouseholdToolMain}
-                              onChange={(e) => { setSelectedHouseholdToolMain(e.target.value); setSelectedHouseholdToolSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(HOUSEHOLD_TOOLS_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedHouseholdToolMain(v); setSelectedHouseholdToolSub(''); }}
+                              onDelete={(opt) => removeHouseholdToolMain(opt)}
+                              onEdit={(prev, next) => renameHouseholdToolMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3840,24 +5130,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewHouseholdToolMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addHouseholdToolMain}>إضافة</button>
-                              {selectedHouseholdToolMain && (
+                              {/* {selectedHouseholdToolMain && (
                                 <button className="btn-delete" onClick={() => removeHouseholdToolMain(selectedHouseholdToolMain)}>حذف الرئيسي</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={householdToolSubs}
                               value={selectedHouseholdToolSub}
-                              onChange={(e) => setSelectedHouseholdToolSub(e.target.value)}
+                              onChange={(v) => setSelectedHouseholdToolSub(v)}
+                              onDelete={(opt) => removeHouseholdToolSub(opt)}
+                              onEdit={(prev, next) => renameHouseholdToolSub(prev, next)}
                               disabled={!selectedHouseholdToolMain}
-                            >
-                              <option value="">{selectedHouseholdToolMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {householdToolSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedHouseholdToolMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3887,16 +5175,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(HOME_APPLIANCES_MAIN_SUBS)}
                               value={selectedHomeApplianceMain}
-                              onChange={(e) => { setSelectedHomeApplianceMain(e.target.value); setSelectedHomeApplianceSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(HOME_APPLIANCES_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedHomeApplianceMain(v); setSelectedHomeApplianceSub(''); }}
+                              onDelete={(opt) => removeHomeApplianceMain(opt)}
+                              onEdit={(prev, next) => renameHomeApplianceMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3906,24 +5192,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewHomeApplianceMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addHomeApplianceMain}>إضافة</button>
-                              {selectedHomeApplianceMain && (
+                              {/* {selectedHomeApplianceMain && (
                                 <button className="btn-delete" onClick={() => removeHomeApplianceMain(selectedHomeApplianceMain)}>حذف الرئيسي</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={homeApplianceSubs}
                               value={selectedHomeApplianceSub}
-                              onChange={(e) => setSelectedHomeApplianceSub(e.target.value)}
+                              onChange={(v) => setSelectedHomeApplianceSub(v)}
+                              onDelete={(opt) => removeHomeApplianceSub(opt)}
+                              onEdit={(prev, next) => renameHomeApplianceSub(prev, next)}
                               disabled={!selectedHomeApplianceMain}
-                            >
-                              <option value="">{selectedHomeApplianceMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {homeApplianceSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedHomeApplianceMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -3953,16 +5237,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(ELECTRONICS_MAIN_SUBS)}
                               value={selectedElectronicsMain}
-                              onChange={(e) => { setSelectedElectronicsMain(e.target.value); setSelectedElectronicsSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(ELECTRONICS_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedElectronicsMain(v); setSelectedElectronicsSub(''); }}
+                              onDelete={(opt) => removeElectronicsMain(opt)}
+                              onEdit={(prev, next) => renameElectronicsMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -3972,24 +5254,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewElectronicsMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addElectronicsMain}>إضافة</button>
-                              {selectedElectronicsMain && (
+                              {/* {selectedElectronicsMain && (
                                 <button className="btn-delete" onClick={() => removeElectronicsMain(selectedElectronicsMain)}>حذف الرئيسي</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={electronicsSubs}
                               value={selectedElectronicsSub}
-                              onChange={(e) => setSelectedElectronicsSub(e.target.value)}
+                              onChange={(v) => setSelectedElectronicsSub(v)}
+                              onDelete={(opt) => removeElectronicsSub(opt)}
+                              onEdit={(prev, next) => renameElectronicsSub(prev, next)}
                               disabled={!selectedElectronicsMain}
-                            >
-                              <option value="">{selectedElectronicsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {electronicsSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedElectronicsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -4019,16 +5299,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(HEALTH_MAIN_SUBS)}
                               value={selectedHealthMain}
-                              onChange={(e) => { setSelectedHealthMain(e.target.value); setSelectedHealthSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(HEALTH_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedHealthMain(v); setSelectedHealthSub(''); }}
+                              onDelete={(opt) => removeHealthMain(opt)}
+                              onEdit={(prev, next) => renameHealthMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -4038,24 +5316,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewHealthMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addHealthMain}>إضافة</button>
-                              {selectedHealthMain && (
+                              {/* {selectedHealthMain && (
                                 <button className="btn-delete" onClick={() => removeHealthMain(selectedHealthMain)}>حذف الرئيسي</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={healthSubs}
                               value={selectedHealthSub}
-                              onChange={(e) => setSelectedHealthSub(e.target.value)}
+                              onChange={(v) => setSelectedHealthSub(v)}
+                              onDelete={(opt) => removeHealthSub(opt)}
+                              onEdit={(prev, next) => renameHealthSub(prev, next)}
                               disabled={!selectedHealthMain}
-                            >
-                              <option value="">{selectedHealthMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {healthSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedHealthMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -4085,22 +5361,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedEducationMain} onChange={(e) => { setSelectedEducationMain(e.target.value); setSelectedEducationSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(EDUCATION_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(EDUCATION_MAIN_SUBS)}
+                              value={selectedEducationMain}
+                              onChange={(v) => { setSelectedEducationMain(v); setSelectedEducationSub(''); }}
+                              onDelete={(opt) => removeEducationMain(opt)}
+                              onEdit={(prev, next) => renameEducationMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newEducationMain} onChange={(e) => setNewEducationMain(e.target.value)} />
                               <button className="btn-add" onClick={addEducationMain}>إضافة</button>
-                              {selectedEducationMain && (<button className="btn-delete" onClick={() => removeEducationMain(selectedEducationMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedEducationMain && (<button className="btn-delete" onClick={() => removeEducationMain(selectedEducationMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedEducationSub} onChange={(e) => setSelectedEducationSub(e.target.value)} disabled={!selectedEducationMain}>
-                              <option value="">{selectedEducationMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {educationSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={educationSubs}
+                              value={selectedEducationSub}
+                              onChange={(v) => setSelectedEducationSub(v)}
+                              onDelete={(opt) => removeEducationSub(opt)}
+                              onEdit={(prev, next) => renameEducationSub(prev, next)}
+                              disabled={!selectedEducationMain}
+                              placeholder={selectedEducationMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newEducationSubsBulk} onChange={(e) => setNewEducationSubsBulk(e.target.value)} disabled={!selectedEducationMain} rows={3} />
                               <button className="btn-add" onClick={addEducationSubsBulk} disabled={!selectedEducationMain}>تسليم الفرعيات</button>
@@ -4136,22 +5421,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedShippingMain} onChange={(e) => { setSelectedShippingMain(e.target.value); setSelectedShippingSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(SHIPPING_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(SHIPPING_MAIN_SUBS)}
+                              value={selectedShippingMain}
+                              onChange={(v) => { setSelectedShippingMain(v); setSelectedShippingSub(''); }}
+                              onDelete={(opt) => removeShippingMain(opt)}
+                              onEdit={(prev, next) => renameShippingMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newShippingMain} onChange={(e) => setNewShippingMain(e.target.value)} />
                               <button className="btn-add" onClick={addShippingMain}>إضافة</button>
-                              {selectedShippingMain && (<button className="btn-delete" onClick={() => removeShippingMain(selectedShippingMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedShippingMain && (<button className="btn-delete" onClick={() => removeShippingMain(selectedShippingMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedShippingSub} onChange={(e) => setSelectedShippingSub(e.target.value)} disabled={!selectedShippingMain}>
-                              <option value="">{selectedShippingMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {shippingSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={shippingSubs}
+                              value={selectedShippingSub}
+                              onChange={(v) => setSelectedShippingSub(v)}
+                              onDelete={(opt) => removeShippingSub(opt)}
+                              onEdit={(prev, next) => renameShippingSub(prev, next)}
+                              disabled={!selectedShippingMain}
+                              placeholder={selectedShippingMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newShippingSubsBulk} onChange={(e) => setNewShippingSubsBulk(e.target.value)} disabled={!selectedShippingMain} rows={3} />
                               <button className="btn-add" onClick={addShippingSubsBulk} disabled={!selectedShippingMain}>تسليم الفرعيات</button>
@@ -4171,22 +5465,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedMensClothingShoesMain} onChange={(e) => { setSelectedMensClothingShoesMain(e.target.value); setSelectedMensClothingShoesSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(MENS_CLOTHING_SHOES_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(MENS_CLOTHING_SHOES_MAIN_SUBS)}
+                              value={selectedMensClothingShoesMain}
+                              onChange={(v) => { setSelectedMensClothingShoesMain(v); setSelectedMensClothingShoesSub(''); }}
+                              onDelete={(opt) => removeMensClothingShoesMain(opt)}
+                              onEdit={(prev, next) => renameMensClothingShoesMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newMensClothingShoesMain} onChange={(e) => setNewMensClothingShoesMain(e.target.value)} />
                               <button className="btn-add" onClick={addMensClothingShoesMain}>إضافة</button>
-                              {selectedMensClothingShoesMain && (<button className="btn-delete" onClick={() => removeMensClothingShoesMain(selectedMensClothingShoesMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedMensClothingShoesMain && (<button className="btn-delete" onClick={() => removeMensClothingShoesMain(selectedMensClothingShoesMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedMensClothingShoesSub} onChange={(e) => setSelectedMensClothingShoesSub(e.target.value)} disabled={!selectedMensClothingShoesMain}>
-                              <option value="">{selectedMensClothingShoesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {mensClothingShoesSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={mensClothingShoesSubs}
+                              value={selectedMensClothingShoesSub}
+                              onChange={(v) => setSelectedMensClothingShoesSub(v)}
+                              onDelete={(opt) => removeMensClothingShoesSub(opt)}
+                              onEdit={(prev, next) => renameMensClothingShoesSub(prev, next)}
+                              disabled={!selectedMensClothingShoesMain}
+                              placeholder={selectedMensClothingShoesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newMensClothingShoesSubsBulk} onChange={(e) => setNewMensClothingShoesSubsBulk(e.target.value)} disabled={!selectedMensClothingShoesMain} rows={3} />
                               <button className="btn-add" onClick={addMensClothingShoesSubsBulk} disabled={!selectedMensClothingShoesMain}>تسليم الفرعيات</button>
@@ -4206,22 +5509,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedHeavyEquipmentMain} onChange={(e) => { setSelectedHeavyEquipmentMain(e.target.value); setSelectedHeavyEquipmentSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(HEAVY_EQUIPMENT_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(HEAVY_EQUIPMENT_MAIN_SUBS)}
+                              value={selectedHeavyEquipmentMain}
+                              onChange={(v) => { setSelectedHeavyEquipmentMain(v); setSelectedHeavyEquipmentSub(''); }}
+                              onDelete={(opt) => removeHeavyEquipmentMain(opt)}
+                              onEdit={(prev, next) => renameHeavyEquipmentMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newHeavyEquipmentMain} onChange={(e) => setNewHeavyEquipmentMain(e.target.value)} />
                               <button className="btn-add" onClick={addHeavyEquipmentMain}>إضافة</button>
-                              {selectedHeavyEquipmentMain && (<button className="btn-delete" onClick={() => removeHeavyEquipmentMain(selectedHeavyEquipmentMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedHeavyEquipmentMain && (<button className="btn-delete" onClick={() => removeHeavyEquipmentMain(selectedHeavyEquipmentMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedHeavyEquipmentSub} onChange={(e) => setSelectedHeavyEquipmentSub(e.target.value)} disabled={!selectedHeavyEquipmentMain}>
-                              <option value="">{selectedHeavyEquipmentMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {heavyEquipmentSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={heavyEquipmentSubs}
+                              value={selectedHeavyEquipmentSub}
+                              onChange={(v) => setSelectedHeavyEquipmentSub(v)}
+                              onDelete={(opt) => removeHeavyEquipmentSub(opt)}
+                              onEdit={(prev, next) => renameHeavyEquipmentSub(prev, next)}
+                              disabled={!selectedHeavyEquipmentMain}
+                              placeholder={selectedHeavyEquipmentMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newHeavyEquipmentSubsBulk} onChange={(e) => setNewHeavyEquipmentSubsBulk(e.target.value)} disabled={!selectedHeavyEquipmentMain} rows={3} />
                               <button className="btn-add" onClick={addHeavyEquipmentSubsBulk} disabled={!selectedHeavyEquipmentMain}>تسليم الفرعيات</button>
@@ -4241,22 +5553,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedKidsSuppliesToysMain} onChange={(e) => { setSelectedKidsSuppliesToysMain(e.target.value); setSelectedKidsSuppliesToysSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(KIDS_SUPPLIES_TOYS_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(KIDS_SUPPLIES_TOYS_MAIN_SUBS)}
+                              value={selectedKidsSuppliesToysMain}
+                              onChange={(v) => { setSelectedKidsSuppliesToysMain(v); setSelectedKidsSuppliesToysSub(''); }}
+                              onDelete={(opt) => removeKidsSuppliesToysMain(opt)}
+                              onEdit={(prev, next) => renameKidsSuppliesToysMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newKidsSuppliesToysMain} onChange={(e) => setNewKidsSuppliesToysMain(e.target.value)} />
                               <button className="btn-add" onClick={addKidsSuppliesToysMain}>إضافة</button>
-                              {selectedKidsSuppliesToysMain && (<button className="btn-delete" onClick={() => removeKidsSuppliesToysMain(selectedKidsSuppliesToysMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedKidsSuppliesToysMain && (<button className="btn-delete" onClick={() => removeKidsSuppliesToysMain(selectedKidsSuppliesToysMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedKidsSuppliesToysSub} onChange={(e) => setSelectedKidsSuppliesToysSub(e.target.value)} disabled={!selectedKidsSuppliesToysMain}>
-                              <option value="">{selectedKidsSuppliesToysMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {kidsSuppliesToysSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={kidsSuppliesToysSubs}
+                              value={selectedKidsSuppliesToysSub}
+                              onChange={(v) => setSelectedKidsSuppliesToysSub(v)}
+                              onDelete={(opt) => removeKidsSuppliesToysSub(opt)}
+                              onEdit={(prev, next) => renameKidsSuppliesToysSub(prev, next)}
+                              disabled={!selectedKidsSuppliesToysMain}
+                              placeholder={selectedKidsSuppliesToysMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newKidsSuppliesToysSubsBulk} onChange={(e) => setNewKidsSuppliesToysSubsBulk(e.target.value)} disabled={!selectedKidsSuppliesToysMain} rows={3} />
                               <button className="btn-add" onClick={addKidsSuppliesToysSubsBulk} disabled={!selectedKidsSuppliesToysMain}>تسليم الفرعيات</button>
@@ -4276,22 +5597,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedFreelanceServicesMain} onChange={(e) => { setSelectedFreelanceServicesMain(e.target.value); setSelectedFreelanceServicesSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(FREELANCE_SERVICES_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(FREELANCE_SERVICES_MAIN_SUBS)}
+                              value={selectedFreelanceServicesMain}
+                              onChange={(v) => { setSelectedFreelanceServicesMain(v); setSelectedFreelanceServicesSub(''); }}
+                              onDelete={(opt) => removeFreelanceServicesMain(opt)}
+                              onEdit={(prev, next) => renameFreelanceServicesMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newFreelanceServicesMain} onChange={(e) => setNewFreelanceServicesMain(e.target.value)} />
                               <button className="btn-add" onClick={addFreelanceServicesMain}>إضافة</button>
-                              {selectedFreelanceServicesMain && (<button className="btn-delete" onClick={() => removeFreelanceServicesMain(selectedFreelanceServicesMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedFreelanceServicesMain && (<button className="btn-delete" onClick={() => removeFreelanceServicesMain(selectedFreelanceServicesMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedFreelanceServicesSub} onChange={(e) => setSelectedFreelanceServicesSub(e.target.value)} disabled={!selectedFreelanceServicesMain}>
-                              <option value="">{selectedFreelanceServicesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {freelanceServicesSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={freelanceServicesSubs}
+                              value={selectedFreelanceServicesSub}
+                              onChange={(v) => setSelectedFreelanceServicesSub(v)}
+                              onDelete={(opt) => removeFreelanceServicesSub(opt)}
+                              onEdit={(prev, next) => renameFreelanceServicesSub(prev, next)}
+                              disabled={!selectedFreelanceServicesMain}
+                              placeholder={selectedFreelanceServicesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newFreelanceServicesSubsBulk} onChange={(e) => setNewFreelanceServicesSubsBulk(e.target.value)} disabled={!selectedFreelanceServicesMain} rows={3} />
                               <button className="btn-add" onClick={addFreelanceServicesSubsBulk} disabled={!selectedFreelanceServicesMain}>تسليم الفرعيات</button>
@@ -4311,22 +5641,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedWatchesJewelryMain} onChange={(e) => { setSelectedWatchesJewelryMain(e.target.value); setSelectedWatchesJewelrySub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(WATCHES_JEWELRY_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(WATCHES_JEWELRY_MAIN_SUBS)}
+                              value={selectedWatchesJewelryMain}
+                              onChange={(v) => { setSelectedWatchesJewelryMain(v); setSelectedWatchesJewelrySub(''); }}
+                              onDelete={(opt) => removeWatchesJewelryMain(opt)}
+                              onEdit={(prev, next) => renameWatchesJewelryMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newWatchesJewelryMain} onChange={(e) => setNewWatchesJewelryMain(e.target.value)} />
                               <button className="btn-add" onClick={addWatchesJewelryMain}>إضافة</button>
-                              {selectedWatchesJewelryMain && (<button className="btn-delete" onClick={() => removeWatchesJewelryMain(selectedWatchesJewelryMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedWatchesJewelryMain && (<button className="btn-delete" onClick={() => removeWatchesJewelryMain(selectedWatchesJewelryMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedWatchesJewelrySub} onChange={(e) => setSelectedWatchesJewelrySub(e.target.value)} disabled={!selectedWatchesJewelryMain}>
-                              <option value="">{selectedWatchesJewelryMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {watchesJewelrySubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={watchesJewelrySubs}
+                              value={selectedWatchesJewelrySub}
+                              onChange={(v) => setSelectedWatchesJewelrySub(v)}
+                              onDelete={(opt) => removeWatchesJewelrySub(opt)}
+                              onEdit={(prev, next) => renameWatchesJewelrySub(prev, next)}
+                              disabled={!selectedWatchesJewelryMain}
+                              placeholder={selectedWatchesJewelryMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newWatchesJewelrySubsBulk} onChange={(e) => setNewWatchesJewelrySubsBulk(e.target.value)} disabled={!selectedWatchesJewelryMain} rows={3} />
                               <button className="btn-add" onClick={addWatchesJewelrySubsBulk} disabled={!selectedWatchesJewelryMain}>تسليم الفرعيات</button>
@@ -4346,22 +5685,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedCarServicesMain} onChange={(e) => { setSelectedCarServicesMain(e.target.value); setSelectedCarServicesSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(CAR_SERVICES_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(CAR_SERVICES_MAIN_SUBS)}
+                              value={selectedCarServicesMain}
+                              onChange={(v) => { setSelectedCarServicesMain(v); setSelectedCarServicesSub(''); }}
+                              onDelete={(opt) => removeCarServicesMain(opt)}
+                              onEdit={(prev, next) => renameCarServicesMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newCarServicesMain} onChange={(e) => setNewCarServicesMain(e.target.value)} />
                               <button className="btn-add" onClick={addCarServicesMain}>إضافة</button>
-                              {selectedCarServicesMain && (<button className="btn-delete" onClick={() => removeCarServicesMain(selectedCarServicesMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedCarServicesMain && (<button className="btn-delete" onClick={() => removeCarServicesMain(selectedCarServicesMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedCarServicesSub} onChange={(e) => setSelectedCarServicesSub(e.target.value)} disabled={!selectedCarServicesMain}>
-                              <option value="">{selectedCarServicesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {carServicesSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={carServicesSubs}
+                              value={selectedCarServicesSub}
+                              onChange={(v) => setSelectedCarServicesSub(v)}
+                              onDelete={(opt) => removeCarServicesSub(opt)}
+                              onEdit={(prev, next) => renameCarServicesSub(prev, next)}
+                              disabled={!selectedCarServicesMain}
+                              placeholder={selectedCarServicesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newCarServicesSubsBulk} onChange={(e) => setNewCarServicesSubsBulk(e.target.value)} disabled={!selectedCarServicesMain} rows={3} />
                               <button className="btn-add" onClick={addCarServicesSubsBulk} disabled={!selectedCarServicesMain}>تسليم الفرعيات</button>
@@ -4381,22 +5729,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedGeneralMaintenanceMain} onChange={(e) => { setSelectedGeneralMaintenanceMain(e.target.value); setSelectedGeneralMaintenanceSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(GENERAL_MAINTENANCE_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(GENERAL_MAINTENANCE_MAIN_SUBS)}
+                              value={selectedGeneralMaintenanceMain}
+                              onChange={(v) => { setSelectedGeneralMaintenanceMain(v); setSelectedGeneralMaintenanceSub(''); }}
+                              onDelete={(opt) => removeGeneralMaintenanceMain(opt)}
+                              onEdit={(prev, next) => renameGeneralMaintenanceMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newGeneralMaintenanceMain} onChange={(e) => setNewGeneralMaintenanceMain(e.target.value)} />
                               <button className="btn-add" onClick={addGeneralMaintenanceMain}>إضافة</button>
-                              {selectedGeneralMaintenanceMain && (<button className="btn-delete" onClick={() => removeGeneralMaintenanceMain(selectedGeneralMaintenanceMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedGeneralMaintenanceMain && (<button className="btn-delete" onClick={() => removeGeneralMaintenanceMain(selectedGeneralMaintenanceMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedGeneralMaintenanceSub} onChange={(e) => setSelectedGeneralMaintenanceSub(e.target.value)} disabled={!selectedGeneralMaintenanceMain}>
-                              <option value="">{selectedGeneralMaintenanceMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {generalMaintenanceSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={generalMaintenanceSubs}
+                              value={selectedGeneralMaintenanceSub}
+                              onChange={(v) => setSelectedGeneralMaintenanceSub(v)}
+                              onDelete={(opt) => removeGeneralMaintenanceSub(opt)}
+                              onEdit={(prev, next) => renameGeneralMaintenanceSub(prev, next)}
+                              disabled={!selectedGeneralMaintenanceMain}
+                              placeholder={selectedGeneralMaintenanceMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newGeneralMaintenanceSubsBulk} onChange={(e) => setNewGeneralMaintenanceSubsBulk(e.target.value)} disabled={!selectedGeneralMaintenanceMain} rows={3} />
                               <button className="btn-add" onClick={addGeneralMaintenanceSubsBulk} disabled={!selectedGeneralMaintenanceMain}>تسليم الفرعيات</button>
@@ -4416,22 +5773,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedConstructionToolsMain} onChange={(e) => { setSelectedConstructionToolsMain(e.target.value); setSelectedConstructionToolsSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(CONSTRUCTION_TOOLS_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(CONSTRUCTION_TOOLS_MAIN_SUBS)}
+                              value={selectedConstructionToolsMain}
+                              onChange={(v) => { setSelectedConstructionToolsMain(v); setSelectedConstructionToolsSub(''); }}
+                              onDelete={(opt) => removeConstructionToolsMain(opt)}
+                              onEdit={(prev, next) => renameConstructionToolsMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newConstructionToolsMain} onChange={(e) => setNewConstructionToolsMain(e.target.value)} />
                               <button className="btn-add" onClick={addConstructionToolsMain}>إضافة</button>
-                              {selectedConstructionToolsMain && (<button className="btn-delete" onClick={() => removeConstructionToolsMain(selectedConstructionToolsMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedConstructionToolsMain && (<button className="btn-delete" onClick={() => removeConstructionToolsMain(selectedConstructionToolsMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedConstructionToolsSub} onChange={(e) => setSelectedConstructionToolsSub(e.target.value)} disabled={!selectedConstructionToolsMain}>
-                              <option value="">{selectedConstructionToolsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {constructionToolsSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={constructionToolsSubs}
+                              value={selectedConstructionToolsSub}
+                              onChange={(v) => setSelectedConstructionToolsSub(v)}
+                              onDelete={(opt) => removeConstructionToolsSub(opt)}
+                              onEdit={(prev, next) => renameConstructionToolsSub(prev, next)}
+                              disabled={!selectedConstructionToolsMain}
+                              placeholder={selectedConstructionToolsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newConstructionToolsSubsBulk} onChange={(e) => setNewConstructionToolsSubsBulk(e.target.value)} disabled={!selectedConstructionToolsMain} rows={3} />
                               <button className="btn-add" onClick={addConstructionToolsSubsBulk} disabled={!selectedConstructionToolsMain}>تسليم الفرعيات</button>
@@ -4451,22 +5817,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedGymsMain} onChange={(e) => { setSelectedGymsMain(e.target.value); setSelectedGymsSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(GYMS_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(GYMS_MAIN_SUBS)}
+                              value={selectedGymsMain}
+                              onChange={(v) => { setSelectedGymsMain(v); setSelectedGymsSub(''); }}
+                              onDelete={(opt) => removeGymsMain(opt)}
+                              onEdit={(prev, next) => renameGymsMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newGymsMain} onChange={(e) => setNewGymsMain(e.target.value)} />
                               <button className="btn-add" onClick={addGymsMain}>إضافة</button>
-                              {selectedGymsMain && (<button className="btn-delete" onClick={() => removeGymsMain(selectedGymsMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedGymsMain && (<button className="btn-delete" onClick={() => removeGymsMain(selectedGymsMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedGymsSub} onChange={(e) => setSelectedGymsSub(e.target.value)} disabled={!selectedGymsMain}>
-                              <option value="">{selectedGymsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {gymsSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={gymsSubs}
+                              value={selectedGymsSub}
+                              onChange={(v) => setSelectedGymsSub(v)}
+                              onDelete={(opt) => removeGymsSub(opt)}
+                              onEdit={(prev, next) => renameGymsSub(prev, next)}
+                              disabled={!selectedGymsMain}
+                              placeholder={selectedGymsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newGymsSubsBulk} onChange={(e) => setNewGymsSubsBulk(e.target.value)} disabled={!selectedGymsMain} rows={3} />
                               <button className="btn-add" onClick={addGymsSubsBulk} disabled={!selectedGymsMain}>تسليم الفرعيات</button>
@@ -4486,22 +5861,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedBikesLightVehiclesMain} onChange={(e) => { setSelectedBikesLightVehiclesMain(e.target.value); setSelectedBikesLightVehiclesSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(BIKES_LIGHT_VEHICLES_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(BIKES_LIGHT_VEHICLES_MAIN_SUBS)}
+                              value={selectedBikesLightVehiclesMain}
+                              onChange={(v) => { setSelectedBikesLightVehiclesMain(v); setSelectedBikesLightVehiclesSub(''); }}
+                              onDelete={(opt) => removeBikesLightVehiclesMain(opt)}
+                              onEdit={(prev, next) => renameBikesLightVehiclesMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newBikesLightVehiclesMain} onChange={(e) => setNewBikesLightVehiclesMain(e.target.value)} />
                               <button className="btn-add" onClick={addBikesLightVehiclesMain}>إضافة</button>
-                              {selectedBikesLightVehiclesMain && (<button className="btn-delete" onClick={() => removeBikesLightVehiclesMain(selectedBikesLightVehiclesMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedBikesLightVehiclesMain && (<button className="btn-delete" onClick={() => removeBikesLightVehiclesMain(selectedBikesLightVehiclesMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedBikesLightVehiclesSub} onChange={(e) => setSelectedBikesLightVehiclesSub(e.target.value)} disabled={!selectedBikesLightVehiclesMain}>
-                              <option value="">{selectedBikesLightVehiclesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {bikesLightVehiclesSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={bikesLightVehiclesSubs}
+                              value={selectedBikesLightVehiclesSub}
+                              onChange={(v) => setSelectedBikesLightVehiclesSub(v)}
+                              onDelete={(opt) => removeBikesLightVehiclesSub(opt)}
+                              onEdit={(prev, next) => renameBikesLightVehiclesSub(prev, next)}
+                              disabled={!selectedBikesLightVehiclesMain}
+                              placeholder={selectedBikesLightVehiclesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newBikesLightVehiclesSubsBulk} onChange={(e) => setNewBikesLightVehiclesSubsBulk(e.target.value)} disabled={!selectedBikesLightVehiclesMain} rows={3} />
                               <button className="btn-add" onClick={addBikesLightVehiclesSubsBulk} disabled={!selectedBikesLightVehiclesMain}>تسليم الفرعيات</button>
@@ -4521,22 +5905,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedMaterialsProductionLinesMain} onChange={(e) => { setSelectedMaterialsProductionLinesMain(e.target.value); setSelectedMaterialsProductionLinesSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(MATERIALS_PRODUCTION_LINES_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(MATERIALS_PRODUCTION_LINES_MAIN_SUBS)}
+                              value={selectedMaterialsProductionLinesMain}
+                              onChange={(v) => { setSelectedMaterialsProductionLinesMain(v); setSelectedMaterialsProductionLinesSub(''); }}
+                              onDelete={(opt) => removeMaterialsProductionLinesMain(opt)}
+                              onEdit={(prev, next) => renameMaterialsProductionLinesMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newMaterialsProductionLinesMain} onChange={(e) => setNewMaterialsProductionLinesMain(e.target.value)} />
                               <button className="btn-add" onClick={addMaterialsProductionLinesMain}>إضافة</button>
-                              {selectedMaterialsProductionLinesMain && (<button className="btn-delete" onClick={() => removeMaterialsProductionLinesMain(selectedMaterialsProductionLinesMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedMaterialsProductionLinesMain && (<button className="btn-delete" onClick={() => removeMaterialsProductionLinesMain(selectedMaterialsProductionLinesMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedMaterialsProductionLinesSub} onChange={(e) => setSelectedMaterialsProductionLinesSub(e.target.value)} disabled={!selectedMaterialsProductionLinesMain}>
-                              <option value="">{selectedMaterialsProductionLinesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {materialsProductionLinesSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={materialsProductionLinesSubs}
+                              value={selectedMaterialsProductionLinesSub}
+                              onChange={(v) => setSelectedMaterialsProductionLinesSub(v)}
+                              onDelete={(opt) => removeMaterialsProductionLinesSub(opt)}
+                              onEdit={(prev, next) => renameMaterialsProductionLinesSub(prev, next)}
+                              disabled={!selectedMaterialsProductionLinesMain}
+                              placeholder={selectedMaterialsProductionLinesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newMaterialsProductionLinesSubsBulk} onChange={(e) => setNewMaterialsProductionLinesSubsBulk(e.target.value)} disabled={!selectedMaterialsProductionLinesMain} rows={3} />
                               <button className="btn-add" onClick={addMaterialsProductionLinesSubsBulk} disabled={!selectedMaterialsProductionLinesMain}>تسليم الفرعيات</button>
@@ -4556,22 +5949,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedFarmsFactoriesProductsMain} onChange={(e) => { setSelectedFarmsFactoriesProductsMain(e.target.value); setSelectedFarmsFactoriesProductsSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(FARMS_FACTORIES_PRODUCTS_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(FARMS_FACTORIES_PRODUCTS_MAIN_SUBS)}
+                              value={selectedFarmsFactoriesProductsMain}
+                              onChange={(v) => { setSelectedFarmsFactoriesProductsMain(v); setSelectedFarmsFactoriesProductsSub(''); }}
+                              onDelete={(opt) => removeFarmsFactoriesProductsMain(opt)}
+                              onEdit={(prev, next) => renameFarmsFactoriesProductsMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newFarmsFactoriesProductsMain} onChange={(e) => setNewFarmsFactoriesProductsMain(e.target.value)} />
                               <button className="btn-add" onClick={addFarmsFactoriesProductsMain}>إضافة</button>
-                              {selectedFarmsFactoriesProductsMain && (<button className="btn-delete" onClick={() => removeFarmsFactoriesProductsMain(selectedFarmsFactoriesProductsMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedFarmsFactoriesProductsMain && (<button className="btn-delete" onClick={() => removeFarmsFactoriesProductsMain(selectedFarmsFactoriesProductsMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedFarmsFactoriesProductsSub} onChange={(e) => setSelectedFarmsFactoriesProductsSub(e.target.value)} disabled={!selectedFarmsFactoriesProductsMain}>
-                              <option value="">{selectedFarmsFactoriesProductsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {farmsFactoriesProductsSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={farmsFactoriesProductsSubs}
+                              value={selectedFarmsFactoriesProductsSub}
+                              onChange={(v) => setSelectedFarmsFactoriesProductsSub(v)}
+                              onDelete={(opt) => removeFarmsFactoriesProductsSub(opt)}
+                              onEdit={(prev, next) => renameFarmsFactoriesProductsSub(prev, next)}
+                              disabled={!selectedFarmsFactoriesProductsMain}
+                              placeholder={selectedFarmsFactoriesProductsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newFarmsFactoriesProductsSubsBulk} onChange={(e) => setNewFarmsFactoriesProductsSubsBulk(e.target.value)} disabled={!selectedFarmsFactoriesProductsMain} rows={3} />
                               <button className="btn-add" onClick={addFarmsFactoriesProductsSubsBulk} disabled={!selectedFarmsFactoriesProductsMain}>تسليم الفرعيات</button>
@@ -4591,22 +5993,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedLightingDecorMain} onChange={(e) => { setSelectedLightingDecorMain(e.target.value); setSelectedLightingDecorSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(LIGHTING_DECOR_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(LIGHTING_DECOR_MAIN_SUBS)}
+                              value={selectedLightingDecorMain}
+                              onChange={(v) => { setSelectedLightingDecorMain(v); setSelectedLightingDecorSub(''); }}
+                              onDelete={(opt) => removeLightingDecorMain(opt)}
+                              onEdit={(prev, next) => renameLightingDecorMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newLightingDecorMain} onChange={(e) => setNewLightingDecorMain(e.target.value)} />
                               <button className="btn-add" onClick={addLightingDecorMain}>إضافة</button>
-                              {selectedLightingDecorMain && (<button className="btn-delete" onClick={() => removeLightingDecorMain(selectedLightingDecorMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedLightingDecorMain && (<button className="btn-delete" onClick={() => removeLightingDecorMain(selectedLightingDecorMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedLightingDecorSub} onChange={(e) => setSelectedLightingDecorSub(e.target.value)} disabled={!selectedLightingDecorMain}>
-                              <option value="">{selectedLightingDecorMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {lightingDecorSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={lightingDecorSubs}
+                              value={selectedLightingDecorSub}
+                              onChange={(v) => setSelectedLightingDecorSub(v)}
+                              onDelete={(opt) => removeLightingDecorSub(opt)}
+                              onEdit={(prev, next) => renameLightingDecorSub(prev, next)}
+                              disabled={!selectedLightingDecorMain}
+                              placeholder={selectedLightingDecorMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newLightingDecorSubsBulk} onChange={(e) => setNewLightingDecorSubsBulk(e.target.value)} disabled={!selectedLightingDecorMain} rows={3} />
                               <button className="btn-add" onClick={addLightingDecorSubsBulk} disabled={!selectedLightingDecorMain}>تسليم الفرعيات</button>
@@ -4626,22 +6037,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedMissingMain} onChange={(e) => { setSelectedMissingMain(e.target.value); setSelectedMissingSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(MISSING_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(MISSING_MAIN_SUBS)}
+                              value={selectedMissingMain}
+                              onChange={(v) => { setSelectedMissingMain(v); setSelectedMissingSub(''); }}
+                              onDelete={(opt) => removeMissingMain(opt)}
+                              onEdit={(prev, next) => renameMissingMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newMissingMain} onChange={(e) => setNewMissingMain(e.target.value)} />
                               <button className="btn-add" onClick={addMissingMain}>إضافة</button>
-                              {selectedMissingMain && (<button className="btn-delete" onClick={() => removeMissingMain(selectedMissingMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedMissingMain && (<button className="btn-delete" onClick={() => removeMissingMain(selectedMissingMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedMissingSub} onChange={(e) => setSelectedMissingSub(e.target.value)} disabled={!selectedMissingMain}>
-                              <option value="">{selectedMissingMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {missingSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={missingSubs}
+                              value={selectedMissingSub}
+                              onChange={(v) => setSelectedMissingSub(v)}
+                              onDelete={(opt) => removeMissingSub(opt)}
+                              onEdit={(prev, next) => renameMissingSub(prev, next)}
+                              disabled={!selectedMissingMain}
+                              placeholder={selectedMissingMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newMissingSubsBulk} onChange={(e) => setNewMissingSubsBulk(e.target.value)} disabled={!selectedMissingMain} rows={3} />
                               <button className="btn-add" onClick={addMissingSubsBulk} disabled={!selectedMissingMain}>تسليم الفرعيات</button>
@@ -4661,22 +6081,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedToolsSuppliesMain} onChange={(e) => { setSelectedToolsSuppliesMain(e.target.value); setSelectedToolsSuppliesSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(TOOLS_SUPPLIES_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(TOOLS_SUPPLIES_MAIN_SUBS)}
+                              value={selectedToolsSuppliesMain}
+                              onChange={(v) => { setSelectedToolsSuppliesMain(v); setSelectedToolsSuppliesSub(''); }}
+                              onDelete={(opt) => removeToolsSuppliesMain(opt)}
+                              onEdit={(prev, next) => renameToolsSuppliesMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newToolsSuppliesMain} onChange={(e) => setNewToolsSuppliesMain(e.target.value)} />
                               <button className="btn-add" onClick={addToolsSuppliesMain}>إضافة</button>
-                              {selectedToolsSuppliesMain && (<button className="btn-delete" onClick={() => removeToolsSuppliesMain(selectedToolsSuppliesMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedToolsSuppliesMain && (<button className="btn-delete" onClick={() => removeToolsSuppliesMain(selectedToolsSuppliesMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedToolsSuppliesSub} onChange={(e) => setSelectedToolsSuppliesSub(e.target.value)} disabled={!selectedToolsSuppliesMain}>
-                              <option value="">{selectedToolsSuppliesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {toolsSuppliesSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={toolsSuppliesSubs}
+                              value={selectedToolsSuppliesSub}
+                              onChange={(v) => setSelectedToolsSuppliesSub(v)}
+                              onDelete={(opt) => removeToolsSuppliesSub(opt)}
+                              onEdit={(prev, next) => renameToolsSuppliesSub(prev, next)}
+                              disabled={!selectedToolsSuppliesMain}
+                              placeholder={selectedToolsSuppliesMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newToolsSuppliesSubsBulk} onChange={(e) => setNewToolsSuppliesSubsBulk(e.target.value)} disabled={!selectedToolsSuppliesMain} rows={3} />
                               <button className="btn-add" onClick={addToolsSuppliesSubsBulk} disabled={!selectedToolsSuppliesMain}>تسليم الفرعيات</button>
@@ -4696,22 +6125,31 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select className="form-select" value={selectedWholesaleMain} onChange={(e) => { setSelectedWholesaleMain(e.target.value); setSelectedWholesaleSub(''); }}>
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(WHOLESALE_MAIN_SUBS).map(t => (<option key={t} value={t}>{t}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={Object.keys(WHOLESALE_MAIN_SUBS)}
+                              value={selectedWholesaleMain}
+                              onChange={(v) => { setSelectedWholesaleMain(v); setSelectedWholesaleSub(''); }}
+                              onDelete={(opt) => removeWholesaleMain(opt)}
+                              onEdit={(prev, next) => renameWholesaleMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input type="text" className="form-input" placeholder="أضف رئيسي" value={newWholesaleMain} onChange={(e) => setNewWholesaleMain(e.target.value)} />
                               <button className="btn-add" onClick={addWholesaleMain}>إضافة</button>
-                              {selectedWholesaleMain && (<button className="btn-delete" onClick={() => removeWholesaleMain(selectedWholesaleMain)}>حذف الرئيسي</button>)}
+                              {/* {selectedWholesaleMain && (<button className="btn-delete" onClick={() => removeWholesaleMain(selectedWholesaleMain)}>حذف الرئيسي</button>)} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select className="form-select" value={selectedWholesaleSub} onChange={(e) => setSelectedWholesaleSub(e.target.value)} disabled={!selectedWholesaleMain}>
-                              <option value="">{selectedWholesaleMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {wholesaleSubs.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                            <ManagedSelect
+                              options={wholesaleSubs}
+                              value={selectedWholesaleSub}
+                              onChange={(v) => setSelectedWholesaleSub(v)}
+                              onDelete={(opt) => removeWholesaleSub(opt)}
+                              onEdit={(prev, next) => renameWholesaleSub(prev, next)}
+                              disabled={!selectedWholesaleMain}
+                              placeholder={selectedWholesaleMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea className="form-input" placeholder="أدخل كل الفرعيات، مفصولة بفواصل أو أسطر" value={newWholesaleSubsBulk} onChange={(e) => setNewWholesaleSubsBulk(e.target.value)} disabled={!selectedWholesaleMain} rows={3} />
                               <button className="btn-add" onClick={addWholesaleSubsBulk} disabled={!selectedWholesaleMain}>تسليم الفرعيات</button>
@@ -4731,16 +6169,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">الماركة</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(PARTS_BRANDS_MODELS)}
                               value={selectedPartsBrand}
-                              onChange={(e) => { setSelectedPartsBrand(e.target.value); setSelectedPartsModel(''); }}
-                            >
-                              <option value="">اختر الماركة</option>
-                              {Object.keys(PARTS_BRANDS_MODELS).map(b => (
-                                <option key={b} value={b}>{b}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedPartsBrand(v); setSelectedPartsModel(''); }}
+                              onDelete={(opt) => removePartsBrand(opt)}
+                              onEdit={(prev, next) => renamePartsBrand(prev, next)}
+                              placeholder="اختر الماركة"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -4750,24 +6186,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewPartsBrand(e.target.value)}
                               />
                               <button className="btn-add" onClick={addPartsBrand}>إضافة</button>
-                              {selectedPartsBrand && (
+                              {/* {selectedPartsBrand && (
                                 <button className="btn-delete" onClick={() => removePartsBrand(selectedPartsBrand)}>حذف الماركة</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">الموديل</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={partsModels}
                               value={selectedPartsModel}
-                              onChange={(e) => setSelectedPartsModel(e.target.value)}
+                              onChange={(v) => setSelectedPartsModel(v)}
+                              onDelete={(opt) => removePartsModel(opt)}
+                              onEdit={(prev, next) => renamePartsModel(prev, next)}
                               disabled={!selectedPartsBrand}
-                            >
-                              <option value="">{selectedPartsBrand ? 'اختر الموديل' : 'اختر الماركة أولًا'}</option>
-                              {partsModels.map(m => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedPartsBrand ? 'اختر الموديل' : 'اختر الماركة أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -4790,16 +6224,14 @@ export default function CategoriesPage() {
                           </div>
                           <div className="location-group">
                             <label className="location-label">رئيسي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(PARTS_MAIN_SUBS)}
                               value={selectedPartsMain}
-                              onChange={(e) => { setSelectedPartsMain(e.target.value); setSelectedPartsSub(''); }}
-                            >
-                              <option value="">اختر الرئيسي</option>
-                              {Object.keys(PARTS_MAIN_SUBS).map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedPartsMain(v); setSelectedPartsSub(''); }}
+                              onDelete={(opt) => removePartsMain(opt)}
+                              onEdit={(prev, next) => renamePartsMain(prev, next)}
+                              placeholder="اختر الرئيسي"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -4809,24 +6241,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewPartsMain(e.target.value)}
                               />
                               <button className="btn-add" onClick={addPartsMain}>إضافة</button>
-                              {selectedPartsMain && (
+                              {/* {selectedPartsMain && (
                                 <button className="btn-delete" onClick={() => removePartsMain(selectedPartsMain)}>حذف الرئيسي</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">فرعي</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={partsSubs}
                               value={selectedPartsSub}
-                              onChange={(e) => setSelectedPartsSub(e.target.value)}
+                              onChange={(v) => setSelectedPartsSub(v)}
+                              onDelete={(opt) => removePartsSub(opt)}
+                              onEdit={(prev, next) => renamePartsSub(prev, next)}
                               disabled={!selectedPartsMain}
-                            >
-                              <option value="">{selectedPartsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}</option>
-                              {partsSubs.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedPartsMain ? 'اختر الفرعي' : 'اختر الرئيسي أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -4856,16 +6286,14 @@ export default function CategoriesPage() {
                         <div className="brand-model-filter">
                           <div className="location-group">
                             <label className="location-label">الماركة</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={Object.keys(RENTAL_BRANDS_MODELS)}
                               value={selectedRentalBrand}
-                              onChange={(e) => { setSelectedRentalBrand(e.target.value); setSelectedRentalModel(''); }}
-                            >
-                              <option value="">اختر الماركة</option>
-                              {Object.keys(RENTAL_BRANDS_MODELS).map(b => (
-                                <option key={b} value={b}>{b}</option>
-                              ))}
-                            </select>
+                              onChange={(v) => { setSelectedRentalBrand(v); setSelectedRentalModel(''); }}
+                              onDelete={(opt) => removeRentalBrand(opt)}
+                              onEdit={(prev, next) => renameRentalBrand(prev, next)}
+                              placeholder="اختر الماركة"
+                            />
                             <div className="inline-actions">
                               <input
                                 type="text"
@@ -4875,24 +6303,22 @@ export default function CategoriesPage() {
                                 onChange={(e) => setNewRentalBrand(e.target.value)}
                               />
                               <button className="btn-add" onClick={addRentalBrand}>إضافة</button>
-                              {selectedRentalBrand && (
+                              {/* {selectedRentalBrand && (
                                 <button className="btn-delete" onClick={() => removeRentalBrand(selectedRentalBrand)}>حذف الماركة</button>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="location-group">
                             <label className="location-label">الموديل</label>
-                            <select
-                              className="form-select"
+                            <ManagedSelect
+                              options={rentalModels}
                               value={selectedRentalModel}
-                              onChange={(e) => setSelectedRentalModel(e.target.value)}
+                              onChange={(v) => setSelectedRentalModel(v)}
+                              onDelete={(opt) => removeRentalModel(opt)}
+                              onEdit={(prev, next) => renameRentalModel(prev, next)}
                               disabled={!selectedRentalBrand}
-                            >
-                              <option value="">{selectedRentalBrand ? 'اختر الموديل' : 'اختر الماركة أولًا'}</option>
-                              {rentalModels.map(m => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
+                              placeholder={selectedRentalBrand ? 'اختر الموديل' : 'اختر الماركة أولًا'}
+                            />
                             <div className="inline-actions">
                               <textarea
                                 className="form-input"
@@ -4919,7 +6345,8 @@ export default function CategoriesPage() {
                               options={rentalYearOptions}
                               value={rentalYear}
                               onChange={(v) => setRentalYear(v)}
-                              onDelete={(opt) => { setRentalYearOptions(prev => prev.filter(x => x !== opt)); if (rentalYear === opt) setRentalYear(''); }}
+                              onDelete={(opt) => deleteRentalYearOption(opt)}
+                              onEdit={(prev, next) => renameRentalYearOption(prev, next)}
                               placeholder="اختر السنة"
                             />
                             <div className="inline-actions">
@@ -4939,7 +6366,8 @@ export default function CategoriesPage() {
                               options={driverOptions}
                               value={driver}
                               onChange={(v) => setDriver(v)}
-                              onDelete={(opt) => { setDriverOptions(prev => prev.filter(x => x !== opt)); if (driver === opt) setDriver(''); }}
+                              onDelete={(opt) => deleteDriverOption(opt)}
+                              onEdit={(prev, next) => renameDriverOption(prev, next)}
                               placeholder="اختر السائق"
                             />
                             <div className="inline-actions">
@@ -4966,7 +6394,8 @@ export default function CategoriesPage() {
                               options={propertyTypeOptions}
                               value={propertyType}
                               onChange={(v) => setPropertyType(v)}
-                              onDelete={(opt) => { setPropertyTypeOptions(prev => prev.filter(x => x !== opt)); if (propertyType === opt) setPropertyType(''); }}
+                              onDelete={(opt) => deletePropertyTypeOptionDirect(opt)}
+                              onEdit={(prev, next) => renamePropertyTypeOption(prev, next)}
                               placeholder="اختر نوع العقار"
                             />
                             <div className="inline-actions">
@@ -4986,7 +6415,8 @@ export default function CategoriesPage() {
                               options={contractTypeOptions}
                               value={contractType}
                               onChange={(v) => setContractType(v)}
-                              onDelete={(opt) => { setContractTypeOptions(prev => prev.filter(x => x !== opt)); if (contractType === opt) setContractType(''); }}
+                              onDelete={(opt) => deleteContractTypeOptionDirect(opt)}
+                              onEdit={(prev, next) => renameContractTypeOption(prev, next)}
                               placeholder="اختر نوع العقد"
                             />
                             <div className="inline-actions">

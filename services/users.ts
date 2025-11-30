@@ -1,4 +1,4 @@
-import { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse } from '@/models/users';
+import { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse, SetFeaturedPayload, SetFeaturedResponse, DisableFeaturedResponse } from '@/models/users';
 
 export async function fetchUsersSummary(token?: string): Promise<UsersSummaryResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
@@ -172,6 +172,55 @@ export async function fetchCategories(token?: string): Promise<CategoriesRespons
   if (!res.ok || !data) {
     const err = raw as { error?: string; message?: string } | null;
     const message = (err?.error || err?.message || 'تعذر جلب الأقسام');
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function setUserFeaturedCategories(payload: SetFeaturedPayload, token?: string): Promise<SetFeaturedResponse & { record_id?: number }> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch('https://api.nasmasr.app/api/admin/featured', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as SetFeaturedResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر حفظ تفضيل المعلن');
+    throw new Error(message);
+  }
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const recordIdCandidates: (unknown)[] = [
+    obj['id'],
+    obj['best_advertiser_id'],
+    (obj['data'] && typeof obj['data'] === 'object') ? (obj['data'] as Record<string, unknown>)['id'] : undefined,
+    (obj['data'] && typeof obj['data'] === 'object') ? (obj['data'] as Record<string, unknown>)['best_advertiser_id'] : undefined,
+  ];
+  let record_id: number | undefined = undefined;
+  for (const cand of recordIdCandidates) {
+    if (typeof cand === 'number' && Number.isFinite(cand)) { record_id = cand; break; }
+    if (typeof cand === 'string' && cand.trim() && Number.isFinite(Number(cand))) { record_id = Number(cand); break; }
+  }
+  return { ...(data || {}), record_id };
+}
+
+export async function disableUserFeatured(recordId: number | string, token?: string): Promise<DisableFeaturedResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/disable/${recordId}`, {
+    method: 'PUT',
+    headers,
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as DisableFeaturedResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر إلغاء تفضيل المعلن');
     throw new Error(message);
   }
   return data;

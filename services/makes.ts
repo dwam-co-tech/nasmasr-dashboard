@@ -1,4 +1,4 @@
-import type { CarMakesResponse, MakeItem, CategoryField, GovernorateItem, CityItem, CategorySlug, CategoryFieldMapBySlug } from '@/models/makes';
+import type { CarMakesResponse, MakeItem, CategoryField, GovernorateItem, CityItem, CategorySlug, CategoryFieldMapBySlug, AdminCategoryFieldUpdateRequest, AdminCategoryFieldApiResponse, AdminMakeCreateResponse, AdminMakeModelsResponse, AdminMakeListItem } from '@/models/makes';
 
 function toArray(x: unknown): unknown[] {
   return Array.isArray(x) ? x : [];
@@ -77,6 +77,17 @@ function normalizeModels(val: unknown): string[] {
   return Array.from(new Set(out));
 }
 
+function canonicalizeFieldName(raw: unknown, slug: string): string | null {
+  const s = normalizeString(raw);
+  if (!s) return null;
+  const name = s.toLowerCase();
+  if (name.includes('main') || name.includes('primary')) return 'category';
+  if (name.includes('sub') || name.includes('secondary')) return 'sub';
+  if (name === 'main_sections' || name === 'main_categories') return 'category';
+  if (name === 'sub_sections' || name === 'sub_categories') return 'sub';
+  return s;
+}
+
 export async function fetchCarMakes(token?: string): Promise<CarMakesResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -133,13 +144,20 @@ export async function fetchCategoryFields(categorySlug: CategorySlug | string, t
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (t) headers.Authorization = `Bearer ${t}`;
+  const urlAdmin = `https://api.nasmasr.app/api/admin/category-fields/api/category-fields?category_slug=${encodeURIComponent(categorySlug)}`;
   const urlOld = `https://api.nasmasr.app/api/category-fields?category_slug=${encodeURIComponent(categorySlug)}`;
   const urlNew = `https://api.nasmasr.app/api/api/category-fields?category_slug=${encodeURIComponent(categorySlug)}`;
-  let res = await fetch(urlOld, { method: 'GET', headers });
+  let res = await fetch(t ? urlAdmin : urlOld, { method: 'GET', headers });
   let raw = (await res.json().catch(() => null)) as unknown;
   if (!res.ok || !raw) {
-    res = await fetch(urlNew, { method: 'GET', headers });
+    const nextUrl = t ? urlOld : urlNew;
+    res = await fetch(nextUrl, { method: 'GET', headers });
     raw = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok || !raw) {
+      const finalUrl = t ? urlNew : urlOld;
+      res = await fetch(finalUrl, { method: 'GET', headers });
+      raw = (await res.json().catch(() => null)) as unknown;
+    }
   }
   if (!res.ok || !raw) {
     const err = raw as { error?: string; message?: string } | null;
@@ -152,7 +170,9 @@ export async function fetchCategoryFields(categorySlug: CategorySlug | string, t
     for (const it of raw) {
       if (it && typeof it === 'object') {
         const o = it as Record<string, unknown>;
-        const name = (o['field_name'] ?? o['name'] ?? o['title']) as string | undefined;
+        const nameRaw = (o['field_name'] ?? o['name'] ?? o['title']) as unknown;
+        const nameCanon = canonicalizeFieldName(nameRaw, String(categorySlug));
+        const name = nameCanon ?? undefined;
         const options = normalizeOptions(o['options']);
         if (name) out.push({ field_name: name, options });
       }
@@ -164,7 +184,9 @@ export async function fetchCategoryFields(categorySlug: CategorySlug | string, t
       for (const it of arr) {
         if (it && typeof it === 'object') {
           const o = it as Record<string, unknown>;
-          const name = (o['field_name'] ?? o['name'] ?? o['title']) as string | undefined;
+          const nameRaw = (o['field_name'] ?? o['name'] ?? o['title']) as unknown;
+          const nameCanon = canonicalizeFieldName(nameRaw, String(categorySlug));
+          const name = nameCanon ?? undefined;
           const options = normalizeOptions(o['options']);
           if (name) out.push({ field_name: name, options });
         }
@@ -174,7 +196,8 @@ export async function fetchCategoryFields(categorySlug: CategorySlug | string, t
       for (const k of keys) {
         const v = obj[k];
         const options = normalizeOptions(v);
-        if (options.length) out.push({ field_name: k, options });
+        const kCanon = canonicalizeFieldName(k, String(categorySlug)) ?? k;
+        if (options.length) out.push({ field_name: kCanon, options });
       }
     }
   }
@@ -211,6 +234,306 @@ export async function fetchCategoryFieldMaps(slugs: (CategorySlug | string)[], t
     out[slug as CategorySlug] = fieldsToMap(fields as CategoryField[]);
   }
   return out;
+}
+
+export async function fetchCategoryMainSubs(slug: CategorySlug | string, token?: string): Promise<Record<string, string[]>> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const urlAdmin = `https://api.nasmasr.app/api/admin/category-fields/api/category-fields?category_slug=${encodeURIComponent(String(slug))}`;
+  const urlOld = `https://api.nasmasr.app/api/category-fields?category_slug=${encodeURIComponent(String(slug))}`;
+  const urlNew = `https://api.nasmasr.app/api/api/category-fields?category_slug=${encodeURIComponent(String(slug))}`;
+  let res = await fetch(t ? urlAdmin : urlOld, { method: 'GET', headers });
+  let raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw) {
+    const nextUrl = t ? urlOld : urlNew;
+    res = await fetch(nextUrl, { method: 'GET', headers });
+    raw = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok || !raw) {
+      const finalUrl = t ? urlNew : urlOld;
+      res = await fetch(finalUrl, { method: 'GET', headers });
+      raw = (await res.json().catch(() => null)) as unknown;
+    }
+  }
+  if (!res.ok || !raw) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر جلب حقول التصنيف';
+    throw new Error(message);
+  }
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const mainSections = obj['main_sections'];
+    if (Array.isArray(mainSections)) {
+      const out: Record<string, string[]> = {};
+      for (const it of mainSections) {
+        if (!it || typeof it !== 'object') continue;
+        const o = it as Record<string, unknown>;
+        const mainName = normalizeString(o['name']) || normalizeString(o['title']) || normalizeString(o['value']) || undefined;
+        const subsRaw = o['sub_sections'];
+        const subs: string[] = Array.isArray(subsRaw)
+          ? subsRaw.map((s) => {
+              if (typeof s === 'string' || typeof s === 'number') return String(s).trim();
+              if (s && typeof s === 'object') {
+                const so = s as Record<string, unknown>;
+                return normalizeString(so['name']) || normalizeString(so['title']) || normalizeString(so['value']) || '';
+              }
+              return '';
+            }).filter((x) => x.length > 0)
+          : [];
+        if (mainName) out[mainName] = subs;
+      }
+      if (Object.keys(out).length) return out;
+    }
+  }
+  const buildFlat = (fields: Record<string, string[]>) => {
+    const mains = fields['category'] ?? fields['main'] ?? fields['main_sections'] ?? [];
+    const subs = fields['sub'] ?? fields['sub_sections'] ?? [];
+    const out: Record<string, string[]> = {};
+    for (const m of mains) out[m] = subs;
+    return out;
+  };
+  const parseOptsMap = (val: unknown): Record<string, string[]> => {
+    const out: Record<string, string[]> = {};
+    if (Array.isArray(val)) {
+      for (const it of val) {
+        if (typeof it === 'string' || typeof it === 'number') {
+          const k = String(it).trim();
+          if (k) out[k] = out[k] ?? [];
+        } else if (it && typeof it === 'object') {
+          const o = it as Record<string, unknown>;
+          const kRaw = o['name'] ?? o['title'] ?? o['value'] ?? o['label'];
+          const k = normalizeString(kRaw);
+          const listVal = o['options'] ?? o['subs'] ?? o['children'] ?? o['models'];
+          const list = normalizeModels(listVal);
+          if (k) out[k] = list;
+        }
+      }
+    } else if (val && typeof val === 'object') {
+      const obj = val as Record<string, unknown>;
+      for (const [kRaw, v] of Object.entries(obj)) {
+        const k = normalizeString(kRaw);
+        const list = normalizeModels(v);
+        if (k) out[k] = list;
+      }
+    }
+    return out;
+  };
+  const fieldsMap: Record<string, string[]> = {};
+  if (Array.isArray(raw)) {
+    for (const it of raw) {
+      if (!it || typeof it !== 'object') continue;
+      const o = it as Record<string, unknown>;
+      const nameCanon = canonicalizeFieldName(o['field_name'] ?? o['name'] ?? o['title'], String(slug));
+      if (!nameCanon) continue;
+      const opts = o['options'];
+      if (nameCanon === 'sub') {
+        const m = parseOptsMap(opts);
+        if (Object.keys(m).length) return m;
+      }
+      const options = normalizeModels(opts);
+      fieldsMap[nameCanon] = options;
+    }
+    return buildFlat(fieldsMap);
+  } else if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const arr = obj['fields'] ?? obj['data'];
+    if (Array.isArray(arr)) {
+      for (const it of arr) {
+        if (!it || typeof it !== 'object') continue;
+        const o = it as Record<string, unknown>;
+        const nameCanon = canonicalizeFieldName(o['field_name'] ?? o['name'] ?? o['title'], String(slug));
+        if (!nameCanon) continue;
+        const opts = o['options'];
+        if (nameCanon === 'sub') {
+          const m = parseOptsMap(opts);
+          if (Object.keys(m).length) return m;
+        }
+        const options = normalizeModels(opts);
+        fieldsMap[nameCanon] = options;
+      }
+      return buildFlat(fieldsMap);
+    } else {
+      const keys = Object.keys(obj);
+      let subMap: Record<string, string[]> | null = null;
+      for (const k of keys) {
+        const kCanon = canonicalizeFieldName(k, String(slug)) ?? k;
+        const v = obj[k];
+        if (kCanon === 'sub') {
+          const m = parseOptsMap(v);
+          if (Object.keys(m).length) subMap = m;
+        }
+        fieldsMap[kCanon] = normalizeModels(v);
+      }
+      if (subMap) return subMap;
+      return buildFlat(fieldsMap);
+    }
+  }
+  return {};
+}
+
+export async function fetchCategoryMainSubsBatch(slugs: (CategorySlug | string)[], token?: string): Promise<Record<string, Record<string, string[]>>> {
+  const tasks = slugs.map(async (s) => {
+    try {
+      const m = await fetchCategoryMainSubs(s, token);
+      return [s, m] as const;
+    } catch {
+      return [s, {}] as const;
+    }
+  });
+  const entries = await Promise.all(tasks);
+  return Object.fromEntries(entries);
+}
+
+export async function postAdminCategoryFieldOptions(slug: CategorySlug | string, payload: AdminCategoryFieldUpdateRequest, token?: string): Promise<AdminCategoryFieldApiResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = `https://api.nasmasr.app/api/admin/category-fields/${encodeURIComponent(String(slug))}`;
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== 'object') {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر تحديث الحقل';
+    throw new Error(message);
+  }
+  const obj = raw as Record<string, unknown>;
+  const data = obj['data'] as AdminCategoryFieldApiResponse['data'];
+  const message = (obj['message'] as string) || 'تم تحديث الحقل بنجاح';
+  return { message, data };
+}
+
+export async function updateCategoryFieldOptions(slug: CategorySlug | string, field_name: string, options: string[], token?: string): Promise<string[]> {
+  const uniq = Array.from(new Set(options.map((x) => String(x).trim()).filter(Boolean)));
+  const resp = await postAdminCategoryFieldOptions(slug, { field_name, options: uniq }, token);
+  return Array.isArray(resp.data?.options) ? resp.data.options : uniq;
+}
+
+export async function fetchAdminMakesWithIds(token?: string): Promise<AdminMakeListItem[]> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = 'https://api.nasmasr.app/api/admin/makes';
+  const res = await fetch(url, { method: 'GET', headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر جلب الماركات';
+    throw new Error(message);
+  }
+  const out: AdminMakeListItem[] = [];
+  const pushItem = (o: Record<string, unknown>) => {
+    const id = typeof o['id'] === 'number' ? (o['id'] as number) : undefined;
+    const nameRaw = o['name'] ?? o['make'] ?? o['brand'];
+    const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
+    const models = normalizeModels(o['models']);
+    if (typeof id === 'number' && name) out.push({ id, name, models });
+  };
+  if (Array.isArray(raw)) {
+    for (const it of raw) {
+      if (it && typeof it === 'object') pushItem(it as Record<string, unknown>);
+    }
+  } else if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const arr = obj['data'] ?? obj['makes'];
+    if (Array.isArray(arr)) {
+      for (const it of arr) {
+        if (it && typeof it === 'object') pushItem(it as Record<string, unknown>);
+      }
+    } else {
+      for (const [k, v] of Object.entries(obj)) {
+        const id = Number.isFinite(Number(k)) ? Number(k) : undefined;
+        if (v && typeof v === 'object') {
+          const o = v as Record<string, unknown>;
+          const nameRaw = o['name'] ?? o['make'] ?? o['brand'];
+          const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
+          const models = normalizeModels(o['models']);
+          if (typeof id === 'number' && name) out.push({ id, name, models });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export async function postAdminMake(name: string, token?: string): Promise<AdminMakeCreateResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = 'https://api.nasmasr.app/api/admin/makes';
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ name }) });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== 'object') {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر إضافة الماركة';
+    throw new Error(message);
+  }
+  const o = raw as Record<string, unknown>;
+  const id = typeof o['id'] === 'number' ? (o['id'] as number) : 0;
+  const nameOut = (o['name'] ?? name) as string;
+  const models = normalizeModels(o['models']);
+  const created_at = typeof o['created_at'] === 'string' ? (o['created_at'] as string) : undefined;
+  const updated_at = typeof o['updated_at'] === 'string' ? (o['updated_at'] as string) : undefined;
+  return { id, name: nameOut, models, created_at, updated_at } as AdminMakeCreateResponse;
+}
+
+export async function postAdminMakeModels(makeId: number, models: string[], token?: string): Promise<AdminMakeModelsResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const uniq = Array.from(new Set(models.map((x) => String(x).trim()).filter(Boolean)));
+  const url = `https://api.nasmasr.app/api/admin/makes/${makeId}/models`;
+  const body = JSON.stringify({ models: uniq });
+  const res = await fetch(url, { method: 'POST', headers, body });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== 'object') {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر إضافة الموديلات';
+    throw new Error(message);
+  }
+  const o = raw as Record<string, unknown>;
+  const mid = typeof o['make_id'] === 'number' ? (o['make_id'] as number) : makeId;
+  const list: { id: number; name: string; make_id: number; created_at?: string; updated_at?: string }[] = [];
+  const arr = o['models'];
+  if (Array.isArray(arr)) {
+    for (const it of arr) {
+      if (it && typeof it === 'object') {
+        const mo = it as Record<string, unknown>;
+        const id = typeof mo['id'] === 'number' ? (mo['id'] as number) : undefined;
+        const name = normalizeString(mo['name']) ?? '';
+        const mk = typeof mo['make_id'] === 'number' ? (mo['make_id'] as number) : mid;
+        const created_at = typeof mo['created_at'] === 'string' ? (mo['created_at'] as string) : undefined;
+        const updated_at = typeof mo['updated_at'] === 'string' ? (mo['updated_at'] as string) : undefined;
+        if (name) list.push({ id: id ?? 0, name, make_id: mk, created_at, updated_at });
+      }
+    }
+  }
+  return { make_id: mid, models: list } as AdminMakeModelsResponse;
+}
+
+export async function addOptionRemote(slug: CategorySlug | string, field_name: string, option: string, currentOptions: string[], token?: string): Promise<string[]> {
+  const next = Array.from(new Set([...currentOptions, option].map((x) => String(x).trim()).filter(Boolean)));
+  return updateCategoryFieldOptions(slug, field_name, next, token);
+}
+
+export async function removeOptionRemote(slug: CategorySlug | string, field_name: string, option: string, currentOptions: string[], token?: string): Promise<string[]> {
+  const next = currentOptions.filter((x) => String(x).trim() !== String(option).trim());
+  return updateCategoryFieldOptions(slug, field_name, next, token);
+}
+
+export async function renameOptionRemote(slug: CategorySlug | string, field_name: string, prevOption: string, nextOption: string, currentOptions: string[], token?: string): Promise<string[]> {
+  const trimmedPrev = String(prevOption).trim();
+  const trimmedNext = String(nextOption).trim();
+  const next = currentOptions.map((x) => (String(x).trim() === trimmedPrev ? trimmedNext : x));
+  return updateCategoryFieldOptions(slug, field_name, next, token);
 }
 
 export async function fetchGovernorates(token?: string): Promise<GovernorateItem[]> {

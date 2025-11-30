@@ -107,3 +107,56 @@ export const CATEGORY_SLUGS: CategorySlug[] = [
 export type CategoryFieldMap = Record<string, string[]>;
 export type CategoryFieldsBySlug = Partial<Record<CategorySlug, CategoryField[]>>;
 export type CategoryFieldMapBySlug = Partial<Record<CategorySlug, CategoryFieldMap>>;
+
+export interface AdminCategoryFieldUpdateRequest {
+  field_name: string;
+  options: string[];
+}
+
+export interface AdminCategoryFieldRecord {
+  id: number;
+  category_slug: string;
+  field_name: string;
+  display_name?: string;
+  type?: string;
+  required?: boolean;
+  filterable?: boolean;
+  options: string[];
+  rules_json?: unknown;
+  is_active?: boolean;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminCategoryFieldApiResponse {
+  message: string;
+  data: AdminCategoryFieldRecord;
+}
+
+export interface AdminMakeCreateResponse {
+  id: number;
+  name: string;
+  models: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminModelRecord {
+  id: number;
+  name: string;
+  make_id: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminMakeModelsResponse {
+  make_id: number;
+  models: AdminModelRecord[];
+}
+
+export interface AdminMakeListItem {
+  id: number;
+  name: string;
+  models: string[];
+}

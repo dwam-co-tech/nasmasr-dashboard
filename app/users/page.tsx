@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { fetchUsersSummary, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage } from '@/services/users';
+import { fetchUsersSummary, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured } from '@/services/users';
+import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
 
 interface User {
   id: string;
@@ -65,6 +66,17 @@ const toImageUrl = (src: string | null | undefined): string => {
   if (src.startsWith('http://') || src.startsWith('https://')) return src;
   const trimmed = src.startsWith('/') ? src.slice(1) : src;
   return `https://api.nasmasr.app/${trimmed}`;
+};
+
+const normalizeCategorySlug = (slug: string): CategorySlug | null => {
+  const s = String(slug || '').trim();
+  if (!s) return null;
+  const variants = [s, s.replace(/-/g, '_'), s.replace(/_/g, '-')];
+  for (const v of variants) {
+    const i = CATEGORY_SLUGS.indexOf(v as CategorySlug);
+    if (i >= 0) return CATEGORY_SLUGS[i];
+  }
+  return null;
 };
 
 export default function UsersPage() {
@@ -218,6 +230,11 @@ export default function UsersPage() {
   const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
   const [userForVerify, setUserForVerify] = useState<User | null>(null);
   const [verificationCode, setVerificationCode] = useState<string>('');
+  const FAV_LS_PREFIX = 'userFavorites:';
+  const FAV_RECORD_PREFIX = 'userFeaturedRecordId:';
+  const [isFavoritesModalOpen, setIsFavoritesModalOpen] = useState(false);
+  const [selectedUserForFavorites, setSelectedUserForFavorites] = useState<User | null>(null);
+  const [favoriteSlugs, setFavoriteSlugs] = useState<string[]>([]);
 
   const openAdDetailsModal = (ad: AdItem) => {
     setAdInModal(ad);
@@ -281,6 +298,75 @@ export default function UsersPage() {
       showToast('تم فتح واتساب', 'success');
     } catch (e) {
       showToast('تعذر فتح واتساب، تحقق من الإعدادات', 'error');
+    }
+  };
+
+  const openFavoritesModal = (user: User) => {
+    setSelectedUserForFavorites(user);
+    try {
+      const raw = localStorage.getItem(FAV_LS_PREFIX + user.id);
+      const arr = raw ? JSON.parse(raw) as string[] : [];
+      setFavoriteSlugs(Array.isArray(arr) ? arr.filter(Boolean) : []);
+    } catch {
+      setFavoriteSlugs([]);
+    }
+    setIsFavoritesModalOpen(true);
+  };
+  const closeFavoritesModal = () => {
+    setIsFavoritesModalOpen(false);
+    setSelectedUserForFavorites(null);
+    setFavoriteSlugs([]);
+  };
+  const toggleFavoriteSlug = (slug: string, v: boolean) => {
+    setFavoriteSlugs(prev => {
+      const set = new Set(prev);
+      if (v) set.add(slug); else set.delete(slug);
+      return Array.from(set);
+    });
+  };
+  const saveFavoritesForUser = async () => {
+    if (!selectedUserForFavorites) return;
+    const uid = Number(selectedUserForFavorites.id);
+    const ids = Array.from(new Set(favoriteSlugs))
+      .map((slug) => normalizeCategorySlug(slug))
+      .map((s) => (s ? CATEGORY_SLUGS.indexOf(s) + 1 : 0))
+      .filter((id) => id > 0);
+    if (ids.length === 0) {
+      showToast('يجب اختيار قسم واحد على الأقل قبل الحفظ', 'warning');
+      return;
+    }
+    try {
+      const resp = await setUserFeaturedCategories({ user_id: uid, category_ids: ids });
+      const rid = typeof resp.record_id === 'number' ? resp.record_id : (typeof resp?.data?.id === 'number' ? resp.data.id : undefined);
+      if (typeof rid === 'number') {
+        localStorage.setItem(FAV_RECORD_PREFIX + selectedUserForFavorites.id, String(rid));
+      }
+      localStorage.setItem(FAV_LS_PREFIX + selectedUserForFavorites.id, JSON.stringify(Array.from(new Set(favoriteSlugs))));
+      showToast('تم حفظ المفضلة للمعلن', 'success');
+      closeFavoritesModal();
+    } catch (e) {
+      const m = e as unknown;
+      const msg = m && typeof m === 'object' && 'message' in m ? String((m as { message?: string }).message || '') : '';
+      showToast(msg || 'تعذر حفظ المفضلة', 'error');
+    }
+  };
+  const clearFavoritesForUser = async () => {
+    if (!selectedUserForFavorites) return;
+    const uid = String(selectedUserForFavorites.id);
+    const ridRaw = localStorage.getItem(FAV_RECORD_PREFIX + uid);
+    const rid = ridRaw && ridRaw.trim() ? ridRaw.trim() : '';
+    try {
+      if (rid) {
+        await disableUserFeatured(rid);
+        localStorage.removeItem(FAV_RECORD_PREFIX + uid);
+      }
+      localStorage.setItem(FAV_LS_PREFIX + selectedUserForFavorites.id, JSON.stringify([]));
+      setFavoriteSlugs([]);
+      showToast(rid ? 'تم إلغاء التفضيل في جميع الأقسام' : 'لا توجد تفضيلات محفوظة، تم الإلغاء محليًا', 'success');
+    } catch (e) {
+      const m = e as unknown;
+      const msg = m && typeof m === 'object' && 'message' in m ? String((m as { message?: string }).message || '') : '';
+      showToast(msg || 'تعذر الإلغاء', 'error');
     }
   };
 
@@ -918,12 +1004,12 @@ export default function UsersPage() {
             >
               الإعلانات
             </button>
-            <button 
+            {/* <button 
               className={`tab-btn ${activeTab === 'transactions' ? 'active' : ''}`}
               onClick={() => setActiveTab('transactions')}
             >
               المعاملات
-            </button>
+            </button> */}
             {/*}
             <button 
               className={`tab-btn ${activeTab === 'logs' ? 'active' : ''}`}
@@ -1584,6 +1670,45 @@ export default function UsersPage() {
           </div>
         </div>
       )}
+      {isFavoritesModalOpen && selectedUserForFavorites && (
+        <div className="modal-overlay" onClick={closeFavoritesModal}>
+          <div className="favorites-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>تفضيل المعلن في الأقسام</h3>
+              <button className="modal-close" onClick={closeFavoritesModal}>✕</button>
+            </div>
+            <div className="modal-content">
+              <div className="favorites-grid">
+                {categories.filter(c => c !== 'all').map((slug) => {
+                  const label = CATEGORY_LABELS_AR[slug] ?? slug;
+                  const checked = favoriteSlugs.includes(slug);
+                  return (
+                    <div key={slug} className="favorite-item">
+                      <div className="favorite-label">{label}</div>
+                      <label className="toggle-label compact">
+                        <div className="toggle-switch-container">
+                          <input
+                            type="checkbox"
+                            className="toggle-input"
+                            checked={checked}
+                            onChange={(e) => toggleFavoriteSlug(slug, e.target.checked)}
+                          />
+                          <span className="toggle-slider"></span>
+                          <span className="toggle-status">{checked ? 'مفضل' : 'غير مفضل'}</span>
+                        </div>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel" onClick={clearFavoritesForUser}>إلغاء التفضيل للجميع</button>
+              <button className="btn-save" onClick={saveFavoritesForUser}>حفظ</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Toast Container */}
       <div className="toast-container">
         {toasts.map((toast) => (
@@ -1817,6 +1942,17 @@ export default function UsersPage() {
                           <path d="M3 12v5l9 4 9-4v-5" stroke="white" strokeWidth="2"/>
                         </svg>
                       </button>
+                      {(String(user.role || '').toLowerCase().includes('advertiser') || String(user.role || '').includes('معلن')) && (
+                        <button
+                          className="btn-favorites"
+                          onClick={() => openFavoritesModal(user)}
+                          title="المفضلة"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="white"/>
+                          </svg>
+                        </button>
+                      )}
                       <button
                         className="btn-delete-user"
                         onClick={() => handleDeleteUser(user.id)}
@@ -1956,6 +2092,15 @@ export default function UsersPage() {
                 >
                   الباقات
                 </button>
+                {(String(user.role || '').toLowerCase().includes('advertiser') || String(user.role || '').includes('معلن')) && (
+                  <button
+                    className="btn-favorites"
+                    onClick={() => openFavoritesModal(user)}
+                    title="المفضلة"
+                  >
+                    المفضلة
+                  </button>
+                )}
                 <button
                   className="btn-delete-user"
                   onClick={() => handleDeleteUser(user.id)}
