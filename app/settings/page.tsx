@@ -3,8 +3,45 @@ import React, { useState, useEffect } from 'react';
 import { fetchSystemSettings, updateSystemSettings } from '@/services/systemSettings';
 const LS_KEY = 'systemSettingsDraft';
 
+interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'error' | 'info' | 'warning';
+  actions?: { label: string; variant?: 'primary' | 'secondary'; onClick?: () => void }[];
+  duration?: number; // milliseconds; if 0 or actions provided, stays until closed
+}
+
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('general');
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (
+    message: string,
+    type: Toast['type'] = 'info',
+    options?: { actions?: Toast['actions']; duration?: number }
+  ) => {
+    const id = Date.now().toString();
+    const newToast: Toast = {
+      id,
+      message,
+      type,
+      actions: options?.actions,
+      duration: options?.duration,
+    };
+    setToasts(prev => [...prev, newToast]);
+
+    const autoDuration = options?.duration ?? 4000;
+    if (!newToast.actions && autoDuration > 0) {
+      setTimeout(() => {
+        setToasts(prev => prev.filter(toast => toast.id !== id));
+      }, autoDuration);
+    }
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  };
+
   const [settings, setSettings] = useState({
     // General Settings
     privacyPolicy: '',
@@ -152,12 +189,12 @@ export default function SettingsPage() {
     try {
       const resp = await updateSystemSettings(payload);
       if (resp?.status === 'ok') {
-        alert('تم حفظ الإعدادات بنجاح!');
+        showToast('تم حفظ الإعدادات بنجاح!', 'success');
       } else {
-        alert('تعذر حفظ الإعدادات');
+        showToast('تعذر حفظ الإعدادات', 'error');
       }
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'حدث خطأ أثناء الحفظ');
+      showToast(e instanceof Error ? e.message : 'حدث خطأ أثناء الحفظ', 'error');
     }
   };
 
@@ -285,7 +322,7 @@ export default function SettingsPage() {
               placeholder="+20 1XX XXX XXXX"
             />
           </div>
-          <div className="form-group">
+          {/* <div className="form-group">
             <label htmlFor="secondarySupport">الدعم الثانوي</label>
             <input
               type="tel"
@@ -306,7 +343,7 @@ export default function SettingsPage() {
               onChange={(e) => handleInputChange('supportNumbers', 'emergency', e.target.value)}
               placeholder="+20 1XX XXX XXXX"
             />
-          </div>
+          </div> */}
         </div>
       </div>
     </div>
@@ -316,7 +353,7 @@ export default function SettingsPage() {
     <div className="settings-section">
       <h3 className="section-title">إعدادات الواجهة</h3>
       
-      <div className="settings-group">
+      {/* <div className="settings-group">
         <h4 className="group-title">عرض أرقام الهواتف</h4>
         <div className="form-group">
           <label className="toggle-label">
@@ -340,13 +377,13 @@ export default function SettingsPage() {
             عند التعطيل، سيتم عرض كود المستخدم مع زر "ابدأ محادثة" بدلاً من رقم الهاتف
           </p>
         </div>
-      </div>
+      </div> */}
 
       <div className="settings-group">
         <h4 className="group-title">إعدادات الصفحة الرئيسية</h4>
         <div className="form-grid">
           <div className="form-group">
-            <label htmlFor="advertisersCount">عدد المعلنين الظاهرين</label>
+            <label htmlFor="advertisersCount">عدد المعلنين المفضلين</label>
             <input
               type="number"
               id="advertisersCount"
@@ -727,6 +764,45 @@ export default function SettingsPage() {
             </button> */}
           </div>
         </div>
+      </div>
+
+      {/* Toast Container */}
+      <div className="toast-container">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast toast-${toast.type}`}>
+            <div className="toast-header">
+              <span className="toast-icon">
+                {toast.type === 'success' && '✓'}
+                {toast.type === 'error' && '✕'}
+                {toast.type === 'warning' && '⚠'}
+                {toast.type === 'info' && 'ℹ'}
+              </span>
+              <span className="toast-message">{toast.message}</span>
+              <button 
+                onClick={() => removeToast(toast.id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', opacity: 0.5 }}
+              >
+                ×
+              </button>
+            </div>
+            {toast.actions && (
+              <div className="toast-actions">
+                {toast.actions.map((action, idx) => (
+                  <button
+                    key={idx}
+                    className={`toast-action-btn toast-action-${action.variant || 'primary'}`}
+                    onClick={() => {
+                      action.onClick?.();
+                      removeToast(toast.id);
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

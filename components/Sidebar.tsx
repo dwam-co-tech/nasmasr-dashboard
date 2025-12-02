@@ -6,7 +6,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { fetchAdminStats, fetchRecentActivities } from "@/services/adminStats";
 import { fetchUsersSummary } from "@/services/users";
 
-const navItems = [
+type NavSubItem = { href: string; label: string; icon: string };
+type NavItem = { href: string; label: string; icon: string; subItems?: NavSubItem[] };
+
+const navItems: NavItem[] = [
   { href: "/dashboard", label: "الرئيسية", icon: "/window.svg" },
   
   /*{

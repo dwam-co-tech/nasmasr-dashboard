@@ -159,6 +159,7 @@ export interface AdminMakeListItem {
   id: number;
   name: string;
   models: string[];
+  model_objects?: AdminModelRecord[];
 }
 
 export interface AdminMainSectionRecord {
@@ -186,4 +187,17 @@ export interface AdminSubSectionRecord {
 export interface AdminSubSectionsResponse {
   main_section_id: number;
   sub_sections: AdminSubSectionRecord[];
+}
+
+export interface AdminCategoryListItem {
+  id: number;
+  slug?: string;
+  name: string;
+  icon?: string;
+  is_active?: boolean;
+  sort_order?: number;
+  show_on_homepage?: boolean;
+  homepage_image?: string;
+  cards_count?: number;
+  fields?: CategoryField[];
 }

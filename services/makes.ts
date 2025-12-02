@@ -1,4 +1,4 @@
-import type { CarMakesResponse, MakeItem, CategoryField, GovernorateItem, CityItem, CategorySlug, CategoryFieldMapBySlug, AdminCategoryFieldUpdateRequest, AdminCategoryFieldApiResponse, AdminMakeCreateResponse, AdminMakeModelsResponse, AdminMakeListItem, AdminMainSectionRecord, AdminSubSectionsResponse, AdminSubSectionRecord, AdminModelRecord } from '@/models/makes';
+import type { CarMakesResponse, MakeItem, CategoryField, GovernorateItem, CityItem, CategorySlug, CategoryFieldMapBySlug, AdminCategoryFieldUpdateRequest, AdminCategoryFieldApiResponse, AdminMakeCreateResponse, AdminMakeModelsResponse, AdminMakeListItem, AdminMainSectionRecord, AdminSubSectionsResponse, AdminSubSectionRecord, AdminModelRecord, AdminCategoryListItem } from '@/models/makes';
 
 function toArray(x: unknown): unknown[] {
   return Array.isArray(x) ? x : [];
@@ -429,7 +429,22 @@ export async function fetchAdminMakesWithIds(token?: string): Promise<AdminMakeL
     const nameRaw = o['name'] ?? o['make'] ?? o['brand'];
     const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
     const models = normalizeModels(o['models']);
-    if (typeof id === 'number' && name) out.push({ id, name, models });
+    const model_objects: AdminModelRecord[] = [];
+    const mRaw = o['models'];
+    if (Array.isArray(mRaw)) {
+      for (const m of mRaw) {
+        if (m && typeof m === 'object') {
+          const mo = m as Record<string, unknown>;
+          const mid = typeof mo['id'] === 'number' ? mo['id'] as number : undefined;
+          const mname = normalizeString(mo['name']);
+          const mmake = typeof mo['make_id'] === 'number' ? mo['make_id'] as number : (typeof id === 'number' ? id : 0);
+          if (mid && mname) {
+            model_objects.push({ id: mid, name: mname, make_id: mmake });
+          }
+        }
+      }
+    }
+    if (typeof id === 'number' && name) out.push({ id, name, models, model_objects });
   };
   if (Array.isArray(raw)) {
     for (const it of raw) {
@@ -447,10 +462,7 @@ export async function fetchAdminMakesWithIds(token?: string): Promise<AdminMakeL
         const id = Number.isFinite(Number(k)) ? Number(k) : undefined;
         if (v && typeof v === 'object') {
           const o = v as Record<string, unknown>;
-          const nameRaw = o['name'] ?? o['make'] ?? o['brand'];
-          const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
-          const models = normalizeModels(o['models']);
-          if (typeof id === 'number' && name) out.push({ id, name, models });
+          pushItem(o);
         }
       }
     }
@@ -593,7 +605,7 @@ export async function fetchMakeModels(makeId: number | string, token?: string): 
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (t) headers.Authorization = `Bearer ${t}`;
-  const url = `https://api.nasmasr.app/api/admin/makes/${makeId}/models`;
+  const url = `https://api.nasmasr.app/api/admin/makes/${makeId}`;
   const res = await fetch(url, { method: 'GET', headers });
   const raw = (await res.json().catch(() => null)) as unknown;
   if (!res.ok || !raw) {
@@ -602,27 +614,21 @@ export async function fetchMakeModels(makeId: number | string, token?: string): 
     throw new Error(message);
   }
   const out: AdminModelRecord[] = [];
-  const pushParsed = (o: Record<string, unknown>) => {
-    const id = typeof o['id'] === 'number' ? (o['id'] as number) : undefined;
-    const name = normalizeString(o['name']) ?? normalizeString(o['model']) ?? '';
-    const mk = typeof o['make_id'] === 'number' ? (o['make_id'] as number) : (typeof makeId === 'number' ? makeId : undefined);
-    const created_at = typeof o['created_at'] === 'string' ? (o['created_at'] as string) : undefined;
-    const updated_at = typeof o['updated_at'] === 'string' ? (o['updated_at'] as string) : undefined;
-    if (typeof id === 'number' && name) out.push({ id, name: String(name), make_id: mk ?? 0, created_at, updated_at });
-  };
-  if (Array.isArray(raw)) {
-    for (const it of raw) {
-      if (it && typeof it === 'object') pushParsed(it as Record<string, unknown>);
-    }
-  } else if (raw && typeof raw === 'object') {
-    const obj = raw as Record<string, unknown>;
-    const arr = obj['models'] ?? obj['data'];
-    if (Array.isArray(arr)) {
-      for (const it of arr) {
-        if (it && typeof it === 'object') pushParsed(it as Record<string, unknown>);
-      }
-    } else {
-      pushParsed(obj);
+  const o = raw as Record<string, unknown>;
+  let makeObj = o;
+  if (!o['models'] && o['data']) {
+      makeObj = o['data'] as Record<string, unknown>;
+  }
+  const modelsArr = makeObj['models'];
+  if (Array.isArray(modelsArr)) {
+    for (const m of modelsArr) {
+        if (m && typeof m === 'object') {
+            const mo = m as Record<string, unknown>;
+            const id = typeof mo['id'] === 'number' ? (mo['id'] as number) : undefined;
+            const name = normalizeString(mo['name']);
+            const mk = typeof mo['make_id'] === 'number' ? (mo['make_id'] as number) : (typeof makeId === 'number' ? Number(makeId) : 0);
+             if (id && name) out.push({ id, name, make_id: mk });
+        }
     }
   }
   return out;
@@ -876,6 +882,172 @@ export async function fetchAdminMainSectionsBatch(slugs: (CategorySlug | string)
   });
   const entries = await Promise.all(tasks);
   return Object.fromEntries(entries);
+}
+
+export async function fetchAdminCategories(token?: string): Promise<AdminCategoryListItem[]> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = 'https://api.nasmasr.app/api/admin/categories';
+  const res = await fetch(url, { method: 'GET', headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر جلب الأقسام';
+    throw new Error(message);
+  }
+  const iconMap: Record<string, string> = {
+    'cars': '🚙',
+    'real_estate': '🏠',
+    'spare-parts': '🔧',
+    'animals': '🐾',
+    'teachers': '👨‍🏫',
+    'doctors': '👨‍⚕️',
+    'jobs': '💼',
+    'food-products': '🍎',
+    'restaurants': '🍕',
+    'stores': '🏬',
+    'groceries': '🍎',
+    'home-services': '🔨',
+    'furniture': '🚛',
+    'home-tools': '🏠',
+    'home-appliances': '📺',
+    'electronics': '💻',
+    'health': '⚕️',
+    'education': '📚',
+    'shipping': '🚚',
+    'mens-clothes': '👔',
+    'heavy-transport': '🚛',
+    'kids-toys': '🎈',
+    'free-professions': '💼',
+    'watches-jewelry': '⌚',
+    'car-services': '🔧',
+    'maintenance': '⚙️',
+    'construction': '⚒️',
+    'gym': '💪',
+    'light-vehicles': '🚲',
+    'production-lines': '🏭',
+    'farm-products': '🌾',
+    'lighting-decor': '💡',
+    'missing': '🔍',
+    'tools': '🔨',
+    'wholesale': '📦',
+  };
+  const pickName = (o: Record<string, unknown>): string => {
+    return (
+      normalizeString(o['display_name'])
+      || normalizeString(o['name_ar'])
+      || normalizeString(o['name'])
+      || normalizeString(o['ar_name'])
+      || normalizeString(o['en_name'])
+      || ''
+    ) as string;
+  };
+  const pickSlug = (o: Record<string, unknown>): string | undefined => {
+    const s = normalizeString(o['slug']) || normalizeString(o['category_slug']) || null;
+    return s || undefined;
+  };
+  const pickIcon = (o: Record<string, unknown>, slug?: string): string | undefined => {
+    const v = normalizeString(o['icon']) || normalizeString(o['emoji']) || null;
+    if (v) return v as string;
+    if (slug && iconMap[slug]) return iconMap[slug];
+    return undefined;
+  };
+  const pickImage = (o: Record<string, unknown>): string | undefined => {
+    const keys = ['homepage_image', 'image', 'image_url', 'icon_url', 'photo', 'banner'];
+    for (const k of keys) {
+      const val = normalizeString(o[k]);
+      if (val) return val as string;
+    }
+    const iconVal = normalizeString(o['icon']);
+    if (iconVal && (String(iconVal).includes('.png') || String(iconVal).includes('.jpg') || String(iconVal).includes('.jpeg') || String(iconVal).includes('.webp'))) {
+      return iconVal as string;
+    }
+    return undefined;
+  };
+  const pickFields = (o: Record<string, unknown>): CategoryField[] | undefined => {
+    const arr = (o['fields'] ?? o['custom_fields'] ?? o['category_fields']) as unknown;
+    const out: CategoryField[] = [];
+    if (Array.isArray(arr)) {
+      for (const it of arr) {
+        if (it && typeof it === 'object') {
+          const fo = it as Record<string, unknown>;
+          const field_name = normalizeString(fo['field_name']);
+          const optionsRaw = fo['options'];
+          const options = Array.isArray(optionsRaw) ? optionsRaw.map(x => String(x)).filter(Boolean) : [];
+          if (field_name) out.push({ field_name, options });
+        }
+      }
+    }
+    return out.length ? out : undefined;
+  };
+  const normalize = (it: unknown): AdminCategoryListItem | null => {
+    if (!it || typeof it !== 'object') return null;
+    const o = it as Record<string, unknown>;
+    const id = typeof o['id'] === 'number' ? (o['id'] as number) : 0;
+    const slug = pickSlug(o);
+    const name = pickName(o);
+    if (!id || !name) return null;
+    const icon = pickIcon(o, slug);
+    const is_active = typeof o['is_active'] === 'boolean' ? (o['is_active'] as boolean) : (normalizeString(o['status']) ? String(o['status']).toLowerCase() === 'active' : undefined);
+    const sort_order = typeof o['sort_order'] === 'number' ? (o['sort_order'] as number) : (typeof o['order'] === 'number' ? (o['order'] as number) : undefined);
+    const show_on_homepage = typeof o['show_on_homepage'] === 'boolean' ? (o['show_on_homepage'] as boolean) : undefined;
+    const homepage_image = pickImage(o);
+    const cards_count = typeof o['cards_count'] === 'number' ? (o['cards_count'] as number) : undefined;
+    const fields = pickFields(o);
+    return { id, slug, name, icon, is_active, sort_order, show_on_homepage, homepage_image, cards_count, fields };
+  };
+  const out: AdminCategoryListItem[] = [];
+  if (Array.isArray(raw)) {
+    for (const it of raw) {
+      const c = normalize(it);
+      if (c) out.push(c);
+    }
+  } else if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const arr1 = obj['categories'];
+    const arr2 = obj['data'];
+    const arr = Array.isArray(arr1) ? arr1 : (Array.isArray(arr2) ? arr2 : []);
+    if (Array.isArray(arr)) {
+      for (const it of arr) {
+        const c = normalize(it);
+        if (c) out.push(c);
+      }
+    } else {
+      const c = normalize(raw);
+      if (c) out.push(c);
+    }
+  }
+  return out;
+}
+
+export async function updateAdminCategoryActive(categoryId: number | string, is_active: boolean, token?: string): Promise<AdminCategoryListItem> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = `https://api.nasmasr.app/api/admin/categories/${categoryId}`;
+  const res = await fetch(url, { method: 'PUT', headers, body: JSON.stringify({ is_active }) });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== 'object') {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر تحديث القسم';
+    throw new Error(message);
+  }
+  const obj = raw as Record<string, unknown>;
+  const data = (obj['data'] ?? obj) as Record<string, unknown>;
+  const id = typeof data['id'] === 'number' ? (data['id'] as number) : (typeof categoryId === 'number' ? (categoryId as number) : 0);
+  const slugVal = data['slug'] ?? data['category_slug'];
+  const slug = typeof slugVal === 'string' ? String(slugVal).trim() : undefined;
+  const nameRaw = data['name'] ?? data['display_name'] ?? data['name_ar'];
+  const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
+  const iconRaw = data['icon'] ?? data['emoji'];
+  const icon = typeof iconRaw === 'string' ? String(iconRaw).trim() : undefined;
+  const sort_order = typeof data['sort_order'] === 'number' ? (data['sort_order'] as number) : (typeof data['order'] === 'number' ? (data['order'] as number) : undefined);
+  const is_active_out = typeof data['is_active'] === 'boolean' ? (data['is_active'] as boolean) : undefined;
+  const imageRaw = data['homepage_image'] ?? data['image'] ?? data['image_url'] ?? data['icon_url'];
+  const homepage_image = typeof imageRaw === 'string' ? String(imageRaw).trim() : undefined;
+  const cards_count = typeof data['cards_count'] === 'number' ? (data['cards_count'] as number) : undefined;
+  return { id, slug, name, icon, is_active: is_active_out, sort_order, homepage_image, cards_count } as AdminCategoryListItem;
 }
 
 export async function updateAdminMainSection(mainSectionId: number, name: string, token?: string): Promise<AdminMainSectionRecord> {

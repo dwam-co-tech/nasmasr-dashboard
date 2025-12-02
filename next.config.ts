@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
         hostname: 'api.nasmasr.app',
         pathname: '/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'nasmasr.app',
+        pathname: '/**',
+      },
     ],
   },
 };

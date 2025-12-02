@@ -4,7 +4,7 @@ export async function fetchSystemSettings(token?: string): Promise<SystemSetting
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (t) headers.Authorization = `Bearer ${t}`;
-  const res = await fetch('https://api.nasmasr.app/api/admin/system-settings/', { method: 'GET', headers });
+  const res = await fetch('https://api.nasmasr.app/api/system-settings', { method: 'GET', headers });
   const raw = (await res.json().catch(() => null)) as unknown;
   const data = raw as SystemSettingsResponse | null;
   if (!res.ok || !data) {

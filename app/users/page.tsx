@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured } from '@/services/users';
 import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
-import { UsersMeta } from '@/models/users';
+import { UsersMeta, AssignUserPackagePayload } from '@/models/users';
 
 interface User {
   id: string;
@@ -674,15 +674,16 @@ export default function UsersPage() {
   const savePackages = async () => {
     if (!selectedUserForPackages) return;
     try {
-      const resp = await assignUserPackage({
+      const payload: AssignUserPackagePayload = {
         user_id: Number(selectedUserForPackages.id),
         featured_ads: Number(packagesForm.featuredAds) || 0,
         featured_days: Number(packagesForm.featuredDays) || 0,
-        ...(packagesForm.startFeaturedNow ? { start_featured_now: true } : {}),
         standard_ads: Number(packagesForm.standardAds) || 0,
         standard_days: Number(packagesForm.standardDays) || 0,
-        ...(packagesForm.startStandardNow ? { start_standard_now: true } : {}),
-      });
+      };
+      if (packagesForm.startFeaturedNow) payload.start_featured_now = true;
+      if (packagesForm.startStandardNow) payload.start_standard_now = true;
+      const resp = await assignUserPackage(payload);
       const d = resp.data;
       try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch {}
       const updatedUser = {
@@ -706,7 +707,11 @@ export default function UsersPage() {
       }
       setIsPackagesModalOpen(false);
       setSelectedUserForPackages(null);
-      showToast(resp.message || 'تم تحديث الباقة بنجاح', 'success');
+      const idText = typeof d.id === 'number' ? String(d.id) : '';
+      const daysText = typeof d.standard_days === 'number' ? String(d.standard_days) : '';
+      const adsText = typeof d.standard_ads === 'number' ? String(d.standard_ads) : '';
+      const info = idText || daysText || adsText ? ` | ID: ${idText} | الأيام: ${daysText} | الإعلانات: ${adsText}` : '';
+      showToast((resp.message || 'تم تحديث الباقة بنجاح') + info, 'success');
     } catch (e) {
       showToast('تعذر حفظ الباقة للمستخدم', 'error');
     }
