@@ -683,6 +683,11 @@ export default function UsersPage() {
       };
       if (packagesForm.startFeaturedNow) payload.start_featured_now = true;
       if (packagesForm.startStandardNow) payload.start_standard_now = true;
+
+      if (packagesForm.featuredStartDate) payload.featured_start_date = new Date(packagesForm.featuredStartDate).toISOString();
+      if (packagesForm.featuredExpiryDate) payload.featured_expire_date = new Date(packagesForm.featuredExpiryDate).toISOString();
+      if (packagesForm.standardStartDate) payload.standard_start_date = new Date(packagesForm.standardStartDate).toISOString();
+      if (packagesForm.standardExpiryDate) payload.standard_expire_date = new Date(packagesForm.standardExpiryDate).toISOString();
       const resp = await assignUserPackage(payload);
       const d = resp.data;
       try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch {}
@@ -1563,7 +1568,10 @@ export default function UsersPage() {
                         onChange={(e) => {
                           const v = e.target.checked;
                           handlePackagesChange('startFeaturedNow', v);
-                          if (v) handlePackagesChange('featuredStartDate', new Date().toISOString().split('T')[0]);
+                          if (v) {
+                            handlePackagesChange('featuredStartDate', new Date().toISOString().split('T')[0]);
+                            handlePackagesChange('startStandardNow', false);
+                          }
                         }}
                       />
                       <span className="toggle-slider"></span>
@@ -1633,7 +1641,10 @@ export default function UsersPage() {
                         onChange={(e) => {
                           const v = e.target.checked;
                           handlePackagesChange('startStandardNow', v);
-                          if (v) handlePackagesChange('standardStartDate', new Date().toISOString().split('T')[0]);
+                          if (v) {
+                            handlePackagesChange('standardStartDate', new Date().toISOString().split('T')[0]);
+                            handlePackagesChange('startFeaturedNow', false);
+                          }
                         }}
                       />
                       <span className="toggle-slider"></span>

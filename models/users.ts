@@ -109,9 +109,13 @@ export interface AssignUserPackagePayload {
   featured_ads: number;
   featured_days: number;
   start_featured_now?: boolean;
+  featured_start_date?: string | null;
+  featured_expire_date?: string | null;
   standard_ads: number;
   standard_days: number;
   start_standard_now?: boolean;
+  standard_start_date?: string | null;
+  standard_expire_date?: string | null;
 }
 
 export interface UserPackageData {
