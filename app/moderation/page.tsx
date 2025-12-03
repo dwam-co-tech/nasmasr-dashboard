@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import ManagedSelect from '@/components/ManagedSelect';
+import { ALL_CATEGORIES } from '@/constants/categories';
 
 interface Ad {
   id: string;
@@ -729,40 +731,6 @@ export default function ModerationPage() {
     pendingIds.forEach((id) => handleAction(id, 'approve'));
   }, [autoApprove, ads]);
 
-  const CategorySelect = ({ options, value, onChange, placeholder, getCount, className }: { options: string[]; value: string; onChange: (v: string) => void; placeholder: string; getCount: (cat: string) => number; className?: string }) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement | null>(null);
-    useEffect(() => {
-      const h = (e: MouseEvent) => {
-        if (!ref.current) return;
-        const t = e.target as Node;
-        if (!ref.current.contains(t)) setOpen(false);
-      };
-      document.addEventListener('mousedown', h);
-      return () => document.removeEventListener('mousedown', h);
-    }, []);
-    return (
-      <div className={`managed-select ${className ? className : ''}`} ref={ref}>
-        <button type="button" className="managed-select-toggle" onClick={() => setOpen(p => !p)}>
-          <span className={`managed-select-value ${value ? 'filled' : ''}`}>{value || placeholder}</span>
-          <span className={`managed-select-caret ${open ? 'open' : ''}`}>▾</span>
-        </button>
-        {open && (
-          <div className="managed-select-menu">
-            <div className={`managed-select-item ${value === '' ? 'selected' : ''}`} onClick={() => { onChange(''); setOpen(false); }}>
-              <span className="managed-select-text">{placeholder}</span>
-            </div>
-            {options.map(opt => (
-              <div key={opt} className={`managed-select-item ${value === opt ? 'selected' : ''}`} onClick={() => { onChange(opt); setOpen(false); }}>
-                <span className="managed-select-text">{opt}</span>
-                <span className="managed-select-badge">{getCount(opt)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // State variables for modals and forms
   const [actionType, setActionType] = useState<'approve' | 'reject' | 'modify'>('reject');
@@ -1049,8 +1017,8 @@ export default function ModerationPage() {
             {/* <div className="queue-filters"> */}
               {/* <label className="filter-label">القسم</label> */}
           <div className="filters-row">
-            <CategorySelect
-              options={uniqueCategories}
+            <ManagedSelect
+              options={ALL_CATEGORIES}
               value={categoryFilter}
               onChange={(v) => setCategoryFilter(v)}
               placeholder={`كل الأقسام (${totalAdsCount})`}

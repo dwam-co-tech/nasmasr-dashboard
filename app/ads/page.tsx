@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import DateInput from "@/components/DateInput";
+import ManagedSelect from '@/components/ManagedSelect';
+import { ALL_CATEGORIES } from '@/constants/categories';
 
 // Mock data for demonstration - 100 ads
 const mockAds = [
@@ -44,7 +46,7 @@ const mockAds = [
   // Adding 97 more ads to reach 100 total
   ...Array.from({ length: 97 }, (_, i) => ({
     id: i + 4,
-    status: ["منشور", "قيد المراجعة", "مرفوض", "مسودة", "منتهي"][Math.floor(Math.random() * 5)],
+    status: ["منشور"][Math.floor(Math.random() * 1)],
     category: ["عقارات", "سيارات", "وظائف", "خدمات", "إلكترونيات", "أزياء", "رياضة", "كتب"][Math.floor(Math.random() * 8)],
     createdDate: `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
     expiryDate: `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
@@ -57,11 +59,11 @@ const mockAds = [
 ];
 
 const statusColors = {
-  "مسودة": "#9CA3AF",
-  "قيد المراجعة": "#FF5C23",
+  // "مسودة": "#9CA3AF",
+  // "قيد المراجعة": "#FF5C23",
   "منشور": "#1BB28F",
-  "مرفوض": "#EF4444",
-  "منتهي": "#6B7280",
+  // "مرفوض": "#EF4444",
+  // "منتهي": "#6B7280",
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -268,10 +270,10 @@ export default function AdsManagement() {
             <div className="value-primary">{ads.length}</div>
             <div className="label">إجمالي الإعلانات</div>
           </div>
-          <div className="stat-card">
+          {/* <div className="stat-card">
             <div className="value-secondary">{ads.filter(ad => ad.status === "قيد المراجعة").length}</div>
             <div className="label">قيد المراجعة</div>
-          </div>
+          </div> */}
           <div 
             className="stat-card clickable-card" 
             onClick={() => window.location.href = '/ads/rejected'}
@@ -301,7 +303,7 @@ export default function AdsManagement() {
 
       {/* Enhanced Filter Bar */}
       <div className="filter-bar">
-        <div className="filter-item">
+        {/* <div className="filter-item">
           <label className="filter-label">🔍 البحث بالحالة</label>
           <select
             value={statusFilter}
@@ -315,25 +317,16 @@ export default function AdsManagement() {
             <option value="مرفوض">مرفوض</option>
             <option value="منتهي">منتهي</option>
           </select>
-        </div>
+        </div> */}
 
         <div className="filter-item">
           <label className="filter-label">📂 القسم</label>
-          <select
+          <ManagedSelect
+            options={ALL_CATEGORIES}
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="form-select"
-          >
-            <option value="">كل الأقسام</option>
-            <option value="عقارات"> عقارات</option>
-            <option value="سيارات"> سيارات</option>
-            <option value="وظائف"> وظائف</option>
-            <option value="خدمات"> خدمات</option>
-            <option value="إلكترونيات"> إلكترونيات</option>
-            <option value="أزياء"> أزياء</option>
-            <option value="رياضة"> رياضة</option>
-            <option value="كتب"> كتب</option>
-          </select>
+            onChange={(v) => setCategoryFilter(v)}
+            placeholder="كل الأقسام"
+          />
         </div>
 
         <div className="filter-item">
@@ -373,14 +366,14 @@ export default function AdsManagement() {
         <table className="ads-table">
           <thead>
             <tr>
-              <th>
+              {/* <th>
                 <input
                   type="checkbox"
                   onChange={(e) => handleSelectAll(e.target.checked)}
                   checked={currentAds.length > 0 && currentAds.every((ad) => selectedAds.includes(ad.id))}
                   className="accent-primary"
                 />
-              </th>
+              </th> */}
               <th>📊 الحالة</th>
               <th>📂 القسم</th>
               <th>📅 تاريخ الإنشاء</th>
@@ -399,14 +392,14 @@ export default function AdsManagement() {
                 key={ad.id} 
                 className="table-row"
               >
-                <td>
+                {/* <td>
                   <input
                     type="checkbox"
                     checked={selectedAds.includes(ad.id)}
                     onChange={(e) => handleSelectAd(ad.id, e.target.checked)}
                     className="accent-primary"
                   />
-                </td>
+                </td> */}
                 <td>
                   <span className={`status-badge ${getStatusClass(ad.status)}`}>
                     {ad.status}

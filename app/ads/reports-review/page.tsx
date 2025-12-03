@@ -1,5 +1,7 @@
 "use client";
 
+import ManagedSelect from '@/components/ManagedSelect';
+import { ALL_CATEGORIES } from '@/constants/categories';
 import { useMemo, useState, useEffect } from "react";
 
 type ReportItem = { reason: string; submittedBy: string; submittedAt: string };
@@ -123,42 +125,30 @@ export default function ReportsReviewPage() {
       <div className="filter-bar">
         <div className="filter-item">
           <label className="filter-label">سبب البلاغ</label>
-          <select
+          <ManagedSelect
             value={reasonFilter}
-            onChange={(e) => { setReasonFilter(e.target.value); setCurrentPage(1); }}
-            className="form-select"
-          >
-            <option value="">كل الأسباب</option>
-            {uniqueReasons.map((r) => (
-              <option key={r} value={r}>{r}</option>
-            ))}
-          </select>
+            onChange={(v) => { setReasonFilter(v); setCurrentPage(1); }}
+            options={uniqueReasons}
+            placeholder="كل الأسباب"
+          />
         </div>
         <div className="filter-item">
           <label className="filter-label">القسم</label>
-          <select
+          <ManagedSelect
             value={categoryFilter}
-            onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
-            className="form-select"
-          >
-            <option value="">كل الأقسام</option>
-            {categoriesPool.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+            onChange={(v) => { setCategoryFilter(v); setCurrentPage(1); }}
+            options={ALL_CATEGORIES}
+            placeholder="كل الأقسام"
+          />
         </div>
         <div className="filter-item">
           <label className="filter-label">الحالة</label>
-          <select
+          <ManagedSelect
             value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-            className="form-select"
-          >
-            <option value="">كل الحالات</option>
-            <option value="منشور">منشور</option>
-            <option value="قيد المراجعة">قيد المراجعة</option>
-            <option value="مرفوض">مرفوض</option>
-          </select>
+            onChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}
+            options={['منشور', 'قيد المراجعة', 'مرفوض']}
+            placeholder="كل الحالات"
+          />
         </div>
         <div className="filter-item">
           <label className="filter-label">بحث</label>

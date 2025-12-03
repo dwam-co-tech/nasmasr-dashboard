@@ -141,15 +141,16 @@ export default function AdDetail({ params }: { params: { id: string } }) {
       {/* Enhanced Tabs Navigation */}
       <div className="ad-detail-tabs">
         {[
-          { id: "details", label: "📋 التفاصيل", icon: "📋" },
-          { id: "images", label: "🖼️ الصور", icon: "🖼️" },
-          { id: "decisions", label: "⚖️ القرارات", icon: "⚖️" },
-          { id: "chat", label: "💬 المحادثة", icon: "💬" }
+          { id: "details", label: " التفاصيل", icon: "" },
+          { id: "images", label: " الصور", icon: "" },
+          // { id: "decisions", label: "⚖️ القرارات", icon: "⚖️" },
+          // { id: "chat", label: "💬 المحادثة", icon: "💬" }
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
+            style={{borderBottom: "2px solid #1BB28F"}}
           >
             {tab.label}
           </button>

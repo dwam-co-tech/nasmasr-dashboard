@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import ManagedSelect from '@/components/ManagedSelect';
+import { CATEGORY_LABELS_AR } from '@/constants/categories';
 import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured } from '@/services/users';
 import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
 import { UsersMeta, AssignUserPackagePayload } from '@/models/users';
@@ -98,9 +100,11 @@ export default function UsersPage() {
   const [categories, setCategories] = useState<string[]>(['all']);
   const [isAdModalOpen, setIsAdModalOpen] = useState(false);
   const [adInModal, setAdInModal] = useState<AdItem | null>(null);
-  type UserSubscriptionForm = { annualFee: number; paidAmount: number };
+  type UserSubscriptionForm = { title: string; annualFee: number; paidAmount: number };
   const SUB_LS_PREFIX = 'userSubscription:';
-  const [subscriptionForm, setSubscriptionForm] = useState<UserSubscriptionForm>({ annualFee: 0, paidAmount: 0 });
+  const [subscriptionForm, setSubscriptionForm] = useState<UserSubscriptionForm>({ title: '', annualFee: 0, paidAmount: 0 });
+  type TransactionItem = { title: string; annualFee: number; paidAmount: number; date: string };
+  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -135,18 +139,19 @@ export default function UsersPage() {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<UserSubscriptionForm>;
         setSubscriptionForm({
+          title: typeof parsed.title === 'string' ? parsed.title : String(parsed.title ?? ''),
           annualFee: typeof parsed.annualFee === 'number' ? parsed.annualFee : Number(parsed.annualFee) || 0,
           paidAmount: typeof parsed.paidAmount === 'number' ? parsed.paidAmount : Number(parsed.paidAmount) || 0,
         });
       } else {
-        setSubscriptionForm({ annualFee: 0, paidAmount: 0 });
+        setSubscriptionForm({ title: '', annualFee: 0, paidAmount: 0 });
       }
     } catch {
-      setSubscriptionForm({ annualFee: 0, paidAmount: 0 });
+      setSubscriptionForm({ title: '', annualFee: 0, paidAmount: 0 });
     }
   }, [selectedUser]);
 
-  const handleSubscriptionChange = (field: keyof UserSubscriptionForm, value: number) => {
+  const handleSubscriptionChange = (field: keyof UserSubscriptionForm, value: number | string) => {
     setSubscriptionForm(prev => ({ ...prev, [field]: value }));
   };
 
@@ -155,6 +160,19 @@ export default function UsersPage() {
     try {
       const payload = { ...subscriptionForm, updatedAt: new Date().toISOString() };
       localStorage.setItem(SUB_LS_PREFIX + selectedUser.id, JSON.stringify(payload));
+      const txKey = SUB_LS_PREFIX + selectedUser.id + ':tx';
+      const now = new Date().toISOString().split('T')[0];
+      const newTx: TransactionItem = {
+        title: String(subscriptionForm.title || ''),
+        annualFee: Number(subscriptionForm.annualFee) || 0,
+        paidAmount: Number(subscriptionForm.paidAmount) || 0,
+        date: now,
+      };
+      const raw = localStorage.getItem(txKey);
+      const arr = raw ? JSON.parse(raw) as TransactionItem[] : [];
+      const next = Array.isArray(arr) ? [...arr, newTx] : [newTx];
+      localStorage.setItem(txKey, JSON.stringify(next));
+      setTransactions(next);
       showToast('تم حفظ بيانات الاشتراك السنوي لهذا المستخدم', 'success');
     } catch {
       showToast('تعذر حفظ بيانات الاشتراك السنوي', 'error');
@@ -174,44 +192,6 @@ export default function UsersPage() {
     loadCats();
   }, []);
 
-  const CATEGORY_LABELS_AR: Record<string, string> = {
-    real_estate: 'عقارات',
-    cars: 'سيارات',
-    cars_rent: 'تأجير سيارات',
-    'spare-parts': 'قطع غيار',
-    stores: 'محلات',
-    restaurants: 'مطاعم',
-    groceries: 'بقالة',
-    'food-products': 'منتجات غذائية',
-    electronics: 'إلكترونيات',
-    'home-tools': 'أدوات منزلية',
-    furniture: 'أثاث',
-    doctors: 'أطباء',
-    health: 'الصحة',
-    teachers: 'معلمون',
-    education: 'تعليم',
-    jobs: 'وظائف',
-    shipping: 'شحن',
-    'mens-clothes': 'ملابس رجالي',
-    'watches-jewelry': 'ساعات ومجوهرات',
-    'free-professions': 'مهن حرة',
-    'kids-toys': 'ألعاب أطفال',
-    gym: 'رياضة',
-    construction: 'مقاولات',
-    maintenance: 'صيانة',
-    'car-services': 'خدمات سيارات',
-    'home-services': 'خدمات منزلية',
-    'lighting-decor': 'إضاءة وديكور',
-    animals: 'حيوانات',
-    'farm-products': 'منتجات زراعية',
-    wholesale: 'جملة',
-    'production-lines': 'خطوط إنتاج',
-    'light-vehicles': 'مركبات خفيفة',
-    'heavy-transport': 'نقل ثقيل',
-    tools: 'أدوات',
-    'home-appliances': 'أجهزة منزلية',
-    missing: 'مفقودات',
-  };
 
 
   // Packages modal state
@@ -551,6 +531,28 @@ export default function UsersPage() {
   useEffect(() => {
     setIsEditing(false);
     setEditForm(null);
+  }, [selectedUser]);
+  useEffect(() => {
+    if (!selectedUser) return;
+    try {
+      const raw = localStorage.getItem(SUB_LS_PREFIX + selectedUser.id);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<UserSubscriptionForm> & { updatedAt?: string };
+        setSubscriptionForm({
+          title: typeof parsed.title === 'string' ? parsed.title : String(parsed.title ?? ''),
+          annualFee: typeof parsed.annualFee === 'number' ? parsed.annualFee : Number(parsed.annualFee) || 0,
+          paidAmount: typeof parsed.paidAmount === 'number' ? parsed.paidAmount : Number(parsed.paidAmount) || 0,
+        });
+      } else {
+        setSubscriptionForm({ title: '', annualFee: 0, paidAmount: 0 });
+      }
+      const txRaw = localStorage.getItem(SUB_LS_PREFIX + selectedUser.id + ':tx');
+      const txArr = txRaw ? JSON.parse(txRaw) as TransactionItem[] : [];
+      setTransactions(Array.isArray(txArr) ? txArr : []);
+    } catch {
+      setSubscriptionForm({ title: '', annualFee: 0, paidAmount: 0 });
+      setTransactions([]);
+    }
   }, [selectedUser]);
 
   const handleBanUser = async (userId: string) => {
@@ -1207,17 +1209,12 @@ export default function UsersPage() {
                   <h3>إعلانات المستخدم</h3>
                   <div className="ads-filter">
                     <label htmlFor="category-filter">فلترة حسب القسم:</label>
-                    <select 
-                      id="category-filter"
-                      value={selectedCategory} 
-                      onChange={(e) => setSelectedCategory(e.target.value)}
-                      className="category-select"
-                    >
-                      <option value="all">all</option>
-                      {categories.filter(cat => cat !== 'all').map((slug) => (
-                        <option key={slug} value={slug}>{slug}</option>
-                      ))}
-                    </select>
+                    <ManagedSelect
+                      value={selectedCategory === 'all' ? '' : selectedCategory}
+                      onChange={(v) => setSelectedCategory(v || 'all')}
+                      options={Object.entries(CATEGORY_LABELS_AR).map(([slug, label]) => ({ value: slug, label }))}
+                      placeholder="all"
+                    />
                   </div>
                 </div>
                 
@@ -1310,6 +1307,15 @@ export default function UsersPage() {
                   <h4>اشتراك سنوي للمستخدم</h4>
                   <div className="subscription-grid">
                     <div className="form-group">
+                      <label>العنوان</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={subscriptionForm.title}
+                        onChange={(e) => handleSubscriptionChange('title', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
                       <label>قيمة الاشتراك السنوي</label>
                       <input
                         type="number"
@@ -1335,6 +1341,13 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <div className="transactions-list">
+                  {transactions.map((t, i) => (
+                    <div className="transaction-item" key={i}>
+                      <span>{t.title || '—'}</span>
+                      <span>{`قيمة الاشتراك: ${t.annualFee} | المدفوع: ${t.paidAmount} جنيه`}</span>
+                      <span>{t.date}</span>
+                    </div>
+                  ))}
                   <div className="transaction-item">
                     <span>رسوم إعلان</span>
                     <span>-50 جنيه</span>
@@ -1868,16 +1881,14 @@ export default function UsersPage() {
                   </td>
                   <td className="user-phone">
                     <div className="phone-with-whatsapp">
-                      <span>{user.phone}</span>
+                      <span className="phone-number">{user.phone}</span>
+
                       <button
                         className="whatsapp-icon"
                         onClick={() => openWhatsAppContact(user)}
                         title="فتح واتساب"
                       >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>
-                          <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none"/>
-                        </svg>
+                        <Image src="/whatsapp_3670133.png" alt="واتساب" width={24} height={24} />
                       </button>
                     </div>
                   </td>

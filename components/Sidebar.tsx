@@ -12,21 +12,21 @@ type NavItem = { href: string; label: string; icon: string; subItems?: NavSubIte
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "الرئيسية", icon: "/window.svg" },
   
-  /*{
+  {
     href: "/ads", 
     label: "إدارة الإعلانات", 
     icon: "/file.svg",
     subItems: [
       { href: "/ads/rules", label: "إدارة الباقات", icon: "/globe.svg" }
     ]
-  },*/
+  },
   { href: "/categories", label: "الأقسام والتصنيفات", icon: "/categories.png" },
-  // { href: "/moderation", label: "الموافقات والمراجعة", icon: "/star.png" },
+  { href: "/moderation", label: "الموافقات والمراجعة", icon: "/star.png" },
   { href: "/users", label: " المستخدمون والمعلِنون والمناديب ", icon: "/profile.png" },
-  // { href: "/reports", label: "التقارير والإحصائيات", icon: "/clipboard.png" },
-  // { href: "/notifications", label: "الإشعارات ", icon: "/bell.png" },
-  // { href: "/messages", label: "الرسائل", icon: "/chat2.png" },
-  // { href: "/customer-chats", label: " محادثات العملاء ", icon: "/chat3.png" },
+  { href: "/reports", label: "التقارير والإحصائيات", icon: "/clipboard.png" },
+  { href: "/notifications", label: "الإشعارات ", icon: "/bell.png" },
+  { href: "/messages", label: "الرسائل", icon: "/chat2.png" },
+  { href: "/customer-chats", label: " محادثات العملاء ", icon: "/chat3.png" },
   { href: "/settings", label: "الضبط العام", icon: "/cogwheel.png" }
 ];
 

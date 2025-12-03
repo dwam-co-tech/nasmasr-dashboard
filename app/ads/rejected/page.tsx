@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import DateInput from "@/components/DateInput";
+import ManagedSelect from '@/components/ManagedSelect';
+import { ALL_CATEGORIES } from '@/constants/categories';
 import "../../back-button.css";
 
 // Mock data for rejected ads - 100 entries
@@ -232,30 +234,22 @@ export default function RejectedAds() {
       <div className="filter-bar">
         <div className="filter-item">
           <label className="filter-label">📂 القسم</label>
-          <select
+          <ManagedSelect
             value={sectionFilter}
-            onChange={(e) => setSectionFilter(e.target.value)}
-            className="form-select"
-          >
-            <option value="">كل الأقسام</option>
-            {uniqueSections.map(section => (
-              <option key={section} value={section}>{section}</option>
-            ))}
-          </select>
+            onChange={(v) => setSectionFilter(v)}
+            options={ALL_CATEGORIES}
+            placeholder="كل الأقسام"
+          />
         </div>
 
         <div className="filter-item">
           <label className="filter-label">👤 من قام بالرفض</label>
-          <select
+          <ManagedSelect
             value={rejectedByFilter}
-            onChange={(e) => setRejectedByFilter(e.target.value)}
-            className="form-select"
-          >
-            <option value="">كل المراجعين</option>
-            {uniqueRejectedBy.map(reviewer => (
-              <option key={reviewer} value={reviewer}>{reviewer}</option>
-            ))}
-          </select>
+            onChange={(v) => setRejectedByFilter(v)}
+            options={uniqueRejectedBy}
+            placeholder="كل المراجعين"
+          />
         </div>
 
         <div className="filter-item">
