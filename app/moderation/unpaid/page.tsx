@@ -5,7 +5,9 @@ import type { ReactNode } from 'react';
 import Image from 'next/image';
 import ManagedSelect from '@/components/ManagedSelect';
 import { ALL_CATEGORIES_OPTIONS } from '@/constants/categories';
-import { fetchAdminPendingListings, updateSystemSettings, approveListing, rejectListing, updateListingForm } from '@/services/listings';
+import { updateSystemSettings, rejectListing, updateListingForm } from '@/services/listings';
+import { approveListing } from '@/services/unpaidListings';
+import { fetchAdminUnpaidListings } from '@/services/unpaidListings';
 import { PendingListing, PendingListingsMeta } from '@/models/listings';
 
 interface Ad {
@@ -24,7 +26,6 @@ interface Ad {
   source?: PendingListing;
 }
 
-
 const rejectionReasons = [
   'صور غير واضحة',
   'معلومات ناقصة',
@@ -34,7 +35,7 @@ const rejectionReasons = [
   'معلومات اتصال غير صحيحة'
 ];
 
-export default function ModerationPage() {
+export default function UnpaidModerationPage() {
   const perPage = 50;
   const [ads, setAds] = useState<Ad[]>([]);
   const [meta, setMeta] = useState<PendingListingsMeta | null>(null);
@@ -118,8 +119,9 @@ export default function ModerationPage() {
   const uniqueCategories = Array.from(new Set(ads.map(ad => ad.category)));
   const visibleAds = useMemo(() => {
     const cf = (categoryFilter || '').trim();
-    if (!cf) return ads;
-    return ads.filter((ad) => (ad.categorySlug || '').trim() === cf);
+    const base = ads.filter((ad) => ad.source?.isPayment === false);
+    if (!cf) return base;
+    return base.filter((ad) => (ad.categorySlug || '').trim() === cf);
   }, [ads, categoryFilter]);
   const categoryOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -130,42 +132,13 @@ export default function ModerationPage() {
     }
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [ads]);
-  
-  // حساب عدد الإعلانات قيد المراجعة
   const pendingAdsCount = visibleAds.filter(ad => ad.status === 'pending').length;
-  
-  // حساب عدد الإعلانات لكل قسم
   const getCategoryCount = (slug: string) => {
     return ads.filter(ad => (ad.categorySlug || '') === slug).length;
   };
-  
-  // حساب إجمالي الإعلانات
   const totalAdsCount = ads.length;
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [categoryFilter]);
-
-  useEffect(() => {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem('moderation:autoApprove') : null;
-    setAutoApprove(raw === 'true');
-  }, []);
-
-  useEffect(() => {
-    if (!autoApprove) return;
-    const activatedAtRaw = typeof window !== 'undefined' ? localStorage.getItem('moderation:autoApproveActivatedAt') : null;
-    if (!activatedAtRaw) return;
-    const activatedAtTime = new Date(activatedAtRaw).getTime();
-    if (!activatedAtTime || Number.isNaN(activatedAtTime)) return;
-    const pendingIds = ads
-      .filter(a => {
-        const created = a.source?.created_at || a.submittedAt;
-        const createdTime = created ? new Date(created).getTime() : 0;
-        return a.status === 'pending' && createdTime > activatedAtTime;
-      })
-      .map(a => a.id);
-    if (pendingIds.length === 0) return;
-    pendingIds.forEach((id) => handleAction(id, 'approve'));
-  }, [autoApprove, ads]);
+  useEffect(() => { setCurrentPage(1); }, [categoryFilter]);
+  useEffect(() => { const raw = typeof window !== 'undefined' ? localStorage.getItem('moderation:autoApprove') : null; setAutoApprove(raw === 'true'); }, []);
 
   const normalizeStatus = (status: string | null | undefined): 'pending' | 'approved' | 'rejected' | 'needs_modification' => {
     const s = String(status || '').toLowerCase();
@@ -317,8 +290,8 @@ export default function ModerationPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const resp = await fetchAdminPendingListings(currentPage, perPage);
-        setMeta(resp.meta);
+        const resp = await fetchAdminUnpaidListings();
+        setMeta(resp.meta ?? { page: 1, per_page: resp.listings.length, total: resp.listings.length, last_page: 1 });
         const mapped = resp.listings.map(mapListingToAd);
         setAds(mapped);
       } catch (e) {
@@ -330,45 +303,29 @@ export default function ModerationPage() {
   }, [currentPage]);
 
   const totalPages = Math.max(1, meta?.last_page ?? 1);
-  const handlePageChange = (p: number) => {
-    if (p >= 1 && p <= totalPages) setCurrentPage(p);
-  };
+  const handlePageChange = (p: number) => { if (p >= 1 && p <= totalPages) setCurrentPage(p); };
   const renderPaginationButtons = () => {
     const buttons: ReactNode[] = [];
     const maxVisiblePages = 5;
     let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
     const endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-    if (endPage - startPage + 1 < maxVisiblePages) {
-      startPage = Math.max(1, endPage - maxVisiblePages + 1);
-    }
-    if (currentPage > 1) {
-      buttons.push(
-        <button key="prev" onClick={() => handlePageChange(currentPage - 1)} className="pagination-btn pagination-nav">←</button>
-      );
-    }
+    if (endPage - startPage + 1 < maxVisiblePages) { startPage = Math.max(1, endPage - maxVisiblePages + 1); }
+    if (currentPage > 1) { buttons.push(<button key="prev" onClick={() => handlePageChange(currentPage - 1)} className="pagination-btn pagination-nav">←</button>); }
     if (startPage > 1) {
       buttons.push(<button key={1} onClick={() => handlePageChange(1)} className="pagination-btn">1</button>);
       if (startPage > 2) buttons.push(<span key="dots1" className="pagination-dots">...</span>);
     }
     for (let i = startPage; i <= endPage; i++) {
-      buttons.push(
-        <button key={i} onClick={() => handlePageChange(i)} className={`pagination-btn ${currentPage === i ? 'active' : ''}`}>{i}</button>
-      );
+      buttons.push(<button key={i} onClick={() => handlePageChange(i)} className={`pagination-btn ${currentPage === i ? 'active' : ''}`}>{i}</button>);
     }
     if (endPage < totalPages) {
       if (endPage < totalPages - 1) buttons.push(<span key="dots2" className="pagination-dots">...</span>);
       buttons.push(<button key={totalPages} onClick={() => handlePageChange(totalPages)} className="pagination-btn">{totalPages}</button>);
     }
-    if (currentPage < totalPages) {
-      buttons.push(
-        <button key="next" onClick={() => handlePageChange(currentPage + 1)} className="pagination-btn pagination-nav">→</button>
-      );
-    }
+    if (currentPage < totalPages) { buttons.push(<button key="next" onClick={() => handlePageChange(currentPage + 1)} className="pagination-btn pagination-nav">→</button>); }
     return <div className="pagination-bar">{buttons}</div>;
   };
 
-
-  // State variables for modals and forms
   const [actionType, setActionType] = useState<'approve' | 'reject' | 'modify'>('reject');
   const [reasonTargetAdId, setReasonTargetAdId] = useState<string | null>(null);
   const [customReason, setCustomReason] = useState('');
@@ -378,9 +335,7 @@ export default function ModerationPage() {
   const [editingImageTarget, setEditingImageTarget] = useState<'main' | number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toasts, setToasts] = useState<{ id: number; type: 'success' | 'error' | 'info'; title: string; message?: string }[]>([]);
-  const dismissToast = (id: number) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  const dismissToast = (id: number) => { setToasts((prev) => prev.filter((t) => t.id !== id)); };
   const showToast = (type: 'success' | 'error' | 'info', title: string, message?: string) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     setToasts((prev) => [...prev, { id, type, title, message }]);
@@ -391,69 +346,54 @@ export default function ModerationPage() {
     const target = ads.find(a => a.id === adId);
     if (!target) return;
     if (action === 'approve') {
-      try {
-        await approveListing(Number(target.source?.id || target.id));
-        showToast('success', 'تمت الموافقة على الإعلان', target.title);
-      } catch (e: any) {
-        showToast('error', 'فشل الموافقة على الإعلان', String(e?.message || e));
-        return;
-      }
+      try { await approveListing(Number(target.source?.id || target.id)); showToast('success', 'تمت الموافقة على الإعلان', target.title); } catch (e: any) { showToast('error', 'فشل الموافقة على الإعلان', String(e?.message || e)); return; }
     } else if (action === 'reject') {
-      try {
-        await rejectListing(Number(target.source?.id || target.id), String(reason || ''));
-        showToast('error', 'تم رفض الإعلان', reason || target.title);
-      } catch (e: any) {
-        showToast('error', 'فشل رفض الإعلان', String(e?.message || e));
-        return;
-      }
+      try { await rejectListing(Number(target.source?.id || target.id), String(reason || '')); showToast('error', 'تم رفض الإعلان', reason || target.title); } catch (e: any) { showToast('error', 'فشل رفض الإعلان', String(e?.message || e)); return; }
     } else {
-      // تعديل فقط: لا ننقل الإعلان، نحدث حالته داخل الصفحة
       setAds(prev => prev.map(ad => ad.id === adId ? { ...ad, status: 'needs_modification' } : ad));
-      if (selectedAd?.id === adId) {
-        setSelectedAd(prev => prev ? { ...prev, status: 'needs_modification' } : null);
-      }
+      if (selectedAd?.id === adId) { setSelectedAd(prev => prev ? { ...prev, status: 'needs_modification' } : null); }
       setShowReasonModal(false);
       setCustomReason('');
       setReasonTargetAdId(null);
       showToast('info', 'تم وضع الإعلان بحالة يحتاج تعديل', reason || target.title);
       return;
     }
-
-    // إزالة الإعلان من صفحة المراجعة بعد القبول/الرفض
     setAds(prev => prev.filter(ad => ad.id !== adId));
-    if (selectedAd?.id === adId) {
-      setSelectedAd(null);
+    if (selectedAd?.id === adId) { setSelectedAd(null); }
+    setShowReasonModal(false);
+    setCustomReason('');
+    setReasonTargetAdId(null);
+  };
+
+  const openImageModal = (adId: string, imageIndex: number) => { setImageModalAdId(adId); setImageModalIndex(imageIndex); setShowImageModal(true); };
+  const closeImageModal = () => { setShowImageModal(false); setImageModalAdId(null); setImageModalIndex(0); };
+  const openReasonModal = (type: 'reject' | 'modify', adId: string) => { setActionType(type); setReasonTargetAdId(adId); setShowReasonModal(true); };
+  const closeReasonModal = () => { setShowReasonModal(false); setCustomReason(''); setReasonTargetAdId(null); };
+  const openPackagesForUserId = (userId?: number | string | null) => {
+    const id = userId ? String(userId) : '';
+    if (!id) { showToast('info', 'لا يوجد مستخدم مرتبط بالإعلان'); return; }
+    try { localStorage.setItem('openPackagesForUserId', id); } catch {}
+    try { window.open('/users', '_blank'); } catch {}
+  };
+  const contactAdvertiser = (ad: Ad) => {
+    const ccRaw = String(ad.source?.country_code || '').trim();
+    const waRaw = String(ad.source?.whatsapp_phone || '').trim();
+    const phoneRaw = String(ad.source?.contact_phone || ad.submitterPhone || '').trim();
+    const cc = ccRaw.replace(/[^+\d]/g, '').replace('+', '');
+    if (waRaw) {
+      const pn = waRaw.replace(/[^+\d]/g, '').replace('+', '');
+      const full = (cc ? cc : '') + pn;
+      const url = `https://wa.me/${full}`;
+      try { window.open(url, '_blank'); } catch {}
+      return;
     }
-
-    setShowReasonModal(false);
-    setCustomReason('');
-    setReasonTargetAdId(null);
+    if (phoneRaw) {
+      const tel = phoneRaw.replace(/\s+/g, '');
+      try { window.open(`tel:${tel}`, '_self'); } catch {}
+      return;
+    }
+    showToast('info', 'لا توجد وسيلة تواصل متاحة لهذا الإعلان');
   };
-
-  const openImageModal = (adId: string, imageIndex: number) => {
-    setImageModalAdId(adId);
-    setImageModalIndex(imageIndex);
-    setShowImageModal(true);
-  };
-
-  const closeImageModal = () => {
-    setShowImageModal(false);
-    setImageModalAdId(null);
-    setImageModalIndex(0);
-  };
-
-  const openReasonModal = (type: 'reject' | 'modify', adId: string) => {
-    setActionType(type);
-    setReasonTargetAdId(adId);
-    setShowReasonModal(true);
-  };
-
-  const closeReasonModal = () => {
-    setShowReasonModal(false);
-    setCustomReason('');
-    setReasonTargetAdId(null);
-  };
-
   const openEditModal = (ad: Ad) => {
     setEditTargetAdId(ad.id);
     setEditForm({
@@ -488,208 +428,32 @@ export default function ModerationPage() {
     });
     setShowEditModal(true);
   };
-
-  const closeEditModal = () => {
-    setShowEditModal(false);
-    setEditTargetAdId(null);
-  };
-
-  const openMobileModal = (ad: Ad) => {
-    setSelectedAd(ad);
-    setShowMobileModal(true);
-  };
-
-  const closeMobileModal = () => {
-    setShowMobileModal(false);
-    setSelectedAd(null);
-  };
-
-  // معرض الصور
-  const nextImage = () => {
-    if (!imageModalAdId) return;
-    const imgs = ads.find(a => a.id === imageModalAdId)?.images || [];
-    if (imgs.length > 0) setImageModalIndex((prev) => (prev + 1) % imgs.length);
-  };
-
-  const prevImage = () => {
-    if (!imageModalAdId) return;
-    const imgs = ads.find(a => a.id === imageModalAdId)?.images || [];
-    if (imgs.length > 0) setImageModalIndex((prev) => (prev - 1 + imgs.length) % imgs.length);
-  };
-
+  const closeEditModal = () => { setShowEditModal(false); setEditTargetAdId(null); };
+  const openMobileModal = (ad: Ad) => { setSelectedAd(ad); setShowMobileModal(true); };
+  const closeMobileModal = () => { setShowMobileModal(false); setSelectedAd(null); };
+  const nextImage = () => { if (!imageModalAdId) return; const imgs = ads.find(a => a.id === imageModalAdId)?.images || []; if (imgs.length > 0) setImageModalIndex((prev) => (prev + 1) % imgs.length); };
+  const prevImage = () => { if (!imageModalAdId) return; const imgs = ads.find(a => a.id === imageModalAdId)?.images || []; if (imgs.length > 0) setImageModalIndex((prev) => (prev - 1 + imgs.length) % imgs.length); };
   const deleteAdImage = (adId: string, index: number) => {
     setAds(prev => prev.map(a => a.id === adId ? { ...a, images: a.images.filter((_, i) => i !== index) } : a));
-    if (selectedAd?.id === adId) {
-      setSelectedAd(prev => prev ? { ...prev, images: prev.images.filter((_, i) => i !== index) } : null);
-    }
+    if (selectedAd?.id === adId) { setSelectedAd(prev => prev ? { ...prev, images: prev.images.filter((_, i) => i !== index) } : null); }
     if (imageModalAdId === adId) {
       const imgs = ads.find(a => a.id === adId)?.images || [];
       const newLength = imgs.length - 1;
-      if (newLength <= 0) {
-        closeImageModal();
-      } else {
-        setImageModalIndex((prev) => Math.min(prev, newLength - 1));
-      }
+      if (newLength <= 0) { closeImageModal(); } else { setImageModalIndex((prev) => Math.min(prev, newLength - 1)); }
     }
   };
 
-  const handleImageEditClick = (target: 'main' | number) => {
-    setEditingImageTarget(target);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-      fileInputRef.current.click();
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (editingImageTarget === 'main') {
-      setEditForm(prev => ({
-        ...prev,
-        main_image_file: file
-      }));
-    } else if (typeof editingImageTarget === 'number') {
-      setEditForm(prev => {
-        const newImages = [...prev.images];
-        newImages[editingImageTarget] = file;
-        return { ...prev, images: newImages };
-      });
-    }
-    setEditingImageTarget(null);
-  };
-
-  const handleEditChange = (field: string, value: any) => {
-    setEditForm(prev => ({ ...prev, [field]: value }));
-  };
-
-  const addImageToEditForm = () => {
-    if (newImageUrl.trim()) {
-      setEditForm(prev => ({ ...prev, images: [...prev.images, newImageUrl.trim()] }));
-      setNewImageUrl('');
-    }
-    if (newImageFile) {
-      setEditForm(prev => ({ ...prev, images: [...prev.images, newImageFile] }));
-      setNewImageFile(null);
-    }
-  };
-
-  const removeImageFromEditForm = (index: number) => {
-    setEditForm(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
-  };
-
-  const handleAttributeValueChange = (key: string, value: string) => {
-    setEditForm(prev => ({ ...prev, attributes: { ...(prev.attributes || {}), [key]: value } }));
-  };
-
-  const addAttributeToEditForm = () => {
-    const k = newAttrKey.trim();
-    const v = newAttrValue.trim();
-    if (!k) return;
-    setEditForm(prev => ({ ...prev, attributes: { ...(prev.attributes || {}), [k]: v } }));
-    setNewAttrKey('');
-    setNewAttrValue('');
-  };
-
-  const removeAttributeFromEditForm = (key: string) => {
-    setEditForm(prev => {
-      const attrs = { ...(prev.attributes || {}) };
-      delete attrs[key];
-      return { ...prev, attributes: attrs };
-    });
-  };
-
+  const handleEditChange = (field: keyof typeof editForm, value: any) => { setEditForm(prev => ({ ...prev, [field]: value })); };
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const target = editingImageTarget; if (target === 'main') { setEditForm(prev => ({ ...prev, main_image_file: file })); } else if (typeof target === 'number') { setEditForm(prev => ({ ...prev, images: prev.images.map((img, i) => i === target ? file : img) })); } };
+  const handleImageEditClick = (target: 'main' | number) => { setEditingImageTarget(target); fileInputRef.current?.click(); };
+  const addImageToEditForm = () => { if (newImageFile) { setEditForm(prev => ({ ...prev, images: [...prev.images, newImageFile] })); setNewImageFile(null); } else if (newImageUrl.trim()) { setEditForm(prev => ({ ...prev, images: [...prev.images, newImageUrl.trim()] })); setNewImageUrl(''); } };
+  const addAttributeToEditForm = () => { const k = newAttrKey.trim(); const v = newAttrValue.trim(); if (!k) return; setEditForm(prev => ({ ...prev, attributes: { ...(prev.attributes || {}), [k]: v } })); setNewAttrKey(''); setNewAttrValue(''); };
+  const removeAttributeFromEditForm = (key: string) => { setEditForm(prev => { const next = { ...(prev.attributes || {}) }; delete next[key]; return { ...prev, attributes: next }; }); };
   const saveEditChanges = async () => {
-    if (!editTargetAdId) return;
-    const targetAd = ads.find(a => a.id === editTargetAdId);
-
-    setAds(prev => prev.map(ad => 
-      ad.id === editTargetAdId
-        ? { ...ad, 
-            title: editForm.title,
-            description: editForm.description,
-            category: editForm.category,
-            price: editForm.price,
-            location: `${editForm.governorate}${editForm.city ? ' - ' + editForm.city : ''}` || editForm.address || '',
-            images: editForm.images.map(i => typeof i === 'string' ? i : URL.createObjectURL(i)),
-            source: {
-              ...(ad.source || {}),
-              title: editForm.title,
-              description: editForm.description,
-              price: editForm.price,
-              currency: editForm.currency,
-              governorate: editForm.governorate,
-              city: editForm.city,
-              lat: editForm.lat,
-              lng: editForm.lng,
-              address: editForm.address,
-              status: editForm.status,
-              plan_type: editForm.plan_type,
-              country_code: editForm.country_code,
-              contact_phone: editForm.contact_phone,
-              whatsapp_phone: editForm.whatsapp_phone,
-              isPayment: editForm.isPayment,
-              admin_comment: editForm.admin_comment,
-              make_id: editForm.make_id ? Number(editForm.make_id) : undefined,
-              make: editForm.make,
-              model_id: editForm.model_id ? Number(editForm.model_id) : undefined,
-              model: editForm.model,
-              views: editForm.views ? Number(editForm.views) : 0,
-              rank: editForm.rank ? Number(editForm.rank) : 0,
-              publish_via: editForm.publish_via,
-              main_image_url: editForm.main_image_url,
-              attributes: editForm.attributes,
-              images_urls: editForm.images.filter((i) => i !== editForm.main_image_url),
-              images: [],
-            } as any
-          }
-        : ad
-    ));
-    if (selectedAd?.id === editTargetAdId) {
-      setSelectedAd(prev => prev ? { 
-        ...prev,
-        title: editForm.title,
-        description: editForm.description,
-        category: editForm.category,
-        price: editForm.price,
-        location: `${editForm.governorate}${editForm.city ? ' - ' + editForm.city : ''}` || editForm.address || '',
-        images: editForm.images.map(i => typeof i === 'string' ? i : URL.createObjectURL(i)),
-        source: {
-          ...(prev.source || {}),
-          title: editForm.title,
-          description: editForm.description,
-          price: editForm.price,
-          currency: editForm.currency,
-          governorate: editForm.governorate,
-          city: editForm.city,
-          lat: editForm.lat,
-          lng: editForm.lng,
-          address: editForm.address,
-          status: editForm.status,
-          plan_type: editForm.plan_type,
-          country_code: editForm.country_code,
-          contact_phone: editForm.contact_phone,
-          whatsapp_phone: editForm.whatsapp_phone,
-          isPayment: editForm.isPayment,
-          admin_comment: editForm.admin_comment,
-          make_id: editForm.make_id ? Number(editForm.make_id) : undefined,
-          make: editForm.make,
-          model_id: editForm.model_id ? Number(editForm.model_id) : undefined,
-          model: editForm.model,
-          views: editForm.views ? Number(editForm.views) : 0,
-          rank: editForm.rank ? Number(editForm.rank) : 0,
-          publish_via: editForm.publish_via,
-          main_image_url: editForm.main_image_url,
-          attributes: editForm.attributes,
-          images_urls: editForm.images.filter((i) => i !== editForm.main_image_url),
-          images: [],
-        } as any
-      } : null);
-    }
     try {
+      const targetAd = ads.find(a => a.id === editTargetAdId);
+      if (!targetAd) return;
       const fd = new FormData();
-      fd.append('_method', 'PUT');
       if (editForm.title) fd.append('title', editForm.title);
       if (editForm.description) fd.append('description', editForm.description);
       if (editForm.price) fd.append('price', editForm.price);
@@ -713,58 +477,21 @@ export default function ModerationPage() {
       if (editForm.views) fd.append('views', editForm.views);
       if (editForm.rank) fd.append('rank', editForm.rank);
       if (editForm.publish_via) fd.append('publish_via', editForm.publish_via);
-      if (editForm.main_image_file) {
-        fd.append('main_image', editForm.main_image_file);
-      } else if (editForm.main_image_url) {
-        fd.append('main_image_url', editForm.main_image_url);
-      }
-      if (editForm.attributes && Object.keys(editForm.attributes).length) {
-        for (const [k, v] of Object.entries(editForm.attributes)) {
-          fd.append(`attributes[${k}]`, String(v ?? ''));
-        }
-      }
-      if (targetAd?.source?.category_id) {
-        fd.append('category_id', String(targetAd.source.category_id));
-      }
-      if (targetAd?.source?.category) {
-        fd.append('category', String(targetAd.source.category));
-      }
-      for (const img of editForm.images) {
-        if (typeof img === 'string') {
-          if (img && img !== editForm.main_image_url) fd.append('images_urls[]', img);
-        } else if (img instanceof File) {
-          fd.append('images[]', img);
-        }
-      }
+      if (editForm.main_image_file) { fd.append('main_image', editForm.main_image_file); } else if (editForm.main_image_url) { fd.append('main_image_url', editForm.main_image_url); }
+      if (editForm.attributes && Object.keys(editForm.attributes).length) { for (const [k, v] of Object.entries(editForm.attributes)) { fd.append(`attributes[${k}]`, String(v ?? '')); } }
+      if (targetAd?.source?.category_id) { fd.append('category_id', String(targetAd.source.category_id)); }
+      if (targetAd?.source?.category) { fd.append('category', String(targetAd.source.category)); }
+      for (const img of editForm.images) { if (typeof img === 'string') { if (img && img !== editForm.main_image_url) fd.append('images_urls[]', img); } else if (img instanceof File) { fd.append('images[]', img); } }
       const slug = String(targetAd?.source?.category || targetAd?.categorySlug || 'real_estate').trim();
       const id = Number(targetAd?.source?.id || editTargetAdId);
       await updateListingForm(slug, id, fd);
       showToast('info', 'تم حفظ تعديلات الإعلان', editForm.title);
-    } catch (e: any) {
-      showToast('error', 'فشل حفظ تعديلات الإعلان', String(e?.message || e));
-    }
+    } catch (e: any) { showToast('error', 'فشل حفظ تعديلات الإعلان', String(e?.message || e)); }
     closeEditModal();
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return '#f59e0b';
-      case 'approved': return '#0f9c85';
-      case 'rejected': return '#ef4444';
-      case 'needs_modification': return '#8b5cf6';
-      default: return '#6b7280';
-    }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'pending': return 'قيد المراجعه';
-      case 'approved': return 'موافق عليه';
-      case 'rejected': return 'مرفوض';
-      case 'needs_modification': return 'يحتاج تعديل';
-      default: return 'غير محدد';
-    }
-  };
+  const getStatusColor = (status: string) => { switch (status) { case 'pending': return '#f59e0b'; case 'approved': return '#0f9c85'; case 'rejected': return '#ef4444'; case 'needs_modification': return '#8b5cf6'; default: return '#6b7280'; } };
+  const getStatusText = (status: string) => { switch (status) { case 'pending': return 'قيد المراجعه'; case 'approved': return 'موافق عليه'; case 'rejected': return 'مرفوض'; case 'needs_modification': return 'يحتاج تعديل'; default: return 'غير محدد'; } };
 
   return (
     <div className="moderation-container">
@@ -780,80 +507,26 @@ export default function ModerationPage() {
           </div>
         ))}
       </div>
-      {/* <div className="moderation-header">
-        <div className="header-content">
-          <div className="title-section">
-            <div className="title-icon">🔍</div>
-            <div>
-              <h1 className="page-title">الموافقات والمراجعة</h1>
-              <p className="page-subtitle">مراجعة وإدارة الإعلانات المرسلة</p>
-            </div>
-          </div>
-          <div className="pending-counter">
-            <div className="counter-badge">
-              <span className="counter-number">{pendingAdsCount}</span>
-              <span className="counter-label">إعلان قيد المراجعة</span>
-            </div>
-          </div>
-        </div>
-      </div> */}
 
       <div className="moderation-layout">
         <div className="queue-section">
-          <div className="queue-header">
-            <h2>مراجعة وإدارة الإعلانات المرسلة </h2>
-            {/* <div className="pending-counter">
-            <div className="counter-badge">
-              <span className="counter-number">{pendingAdsCount}</span>
-              <span className="counter-label">إعلان قيد المراجعة</span>
-            </div>
-          </div> */}
-            {/* <div className="queue-filters"> */}
-              {/* <label className="filter-label">القسم</label> */}
-          <div className="filters-row">
-            <ManagedSelect
-              options={categoryOptions.length ? categoryOptions : ALL_CATEGORIES_OPTIONS}
-              value={categoryFilter}
-              onChange={(v) => setCategoryFilter(v)}
-              placeholder={`كل الأقسام (${totalAdsCount})`}
-              getCount={getCategoryCount}
-              className="category-select-wide"
-            />
-            <label className="toggle-label compact">
-              <span className="toggle-text">الموافقة التلقائية على الإعلانات</span>
-              <div className="toggle-switch-container">
-                <input
-                  type="checkbox"
-                  className="toggle-input"
-                  checked={autoApprove}
-                  onChange={(e) => {
-                    const v = e.target.checked;
-                    setAutoApprove(v);
-                    localStorage.setItem('moderation:autoApprove', String(v));
-                    if (v) {
-                      localStorage.setItem('moderation:autoApproveActivatedAt', new Date().toISOString());
-                    } else {
-                      localStorage.removeItem('moderation:autoApproveActivatedAt');
-                    }
-                    showToast(v ? 'success' : 'info', v ? 'تم تفعيل الموافقة التلقائية' : 'تم إيقاف الموافقة التلقائية');
-                    updateSystemSettings({ manual_approval: !v })
-                      .then(() => {
-                        showToast('success', 'تم تحديث إعدادات النظام');
-                      })
-                      .catch((err: any) => {
-                        showToast('error', 'فشل تحديث إعدادات النظام', String(err?.message || err));
-                      });
-                  }}
+          {(totalAdsCount > 0 && visibleAds.length > 0) && (
+            <div className="queue-header">
+              <h2>مراجعة الإعلانات غير المدفوعة</h2>
+              <div className="filters-row">
+                <ManagedSelect
+                  options={categoryOptions.length ? categoryOptions : ALL_CATEGORIES_OPTIONS}
+                  value={categoryFilter}
+                  onChange={(v) => setCategoryFilter(v)}
+                  placeholder={`كل الأقسام (${totalAdsCount})`}
+                  getCount={getCategoryCount}
+                  className="category-select-wide"
                 />
-                <span className="toggle-slider"></span>
-                <span className="toggle-status">{autoApprove ? 'مفعل' : 'مغلق'}</span>
               </div>
-            </label>
-          </div>
-            {/* </div> */}
-          </div>
+            </div>
+          )}
 
-          {visibleAds.length === 0 ? (
+          {(totalAdsCount === 0 || visibleAds.length === 0) ? (
             <div className="empty-state">
               <div className="empty-card">
                 <div className="empty-icon">📭</div>
@@ -868,19 +541,10 @@ export default function ModerationPage() {
               <div 
                 key={ad.id} 
                 className={`ad-card ${selectedAd?.id === ad.id ? 'selected' : ''}`}
-                onClick={() => {
-                  // Check if it's mobile view
-                  if (window.innerWidth <= 968) {
-                    openMobileModal(ad);
-                  } else {
-                    setSelectedAd(ad);
-                  }
-                }}
+                onClick={() => { if (window.innerWidth <= 968) { openMobileModal(ad); } else { setSelectedAd(ad); } }}
               >
                 <div className="ad-card-header">
-                  <div className="ad-status">
-                    {getStatusText(ad.status)}
-                  </div>
+                  <div className="ad-status">{getStatusText(ad.status)}</div>
                   <div className="ad-id">#{ad.id}</div>
                 </div>
 
@@ -893,10 +557,7 @@ export default function ModerationPage() {
                         width={80}
                         height={60}
                         className="preview-image"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openImageModal(ad.id, 0);
-                        }}
+                        onClick={(e) => { e.stopPropagation(); openImageModal(ad.id, 0); }}
                       />
                     )}
                     {ad.images.length > 1 && (
@@ -915,33 +576,10 @@ export default function ModerationPage() {
                 </div>
 
                 <div className="ad-card-actions">
-                  <button 
-                    className="action-btn approve-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAction(ad.id, 'approve');
-                    }}
-                  >
-                    ✓ موافقة
-                  </button>
-                  <button 
-                    className="action-btn reject-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openReasonModal('reject', ad.id);
-                    }}
-                  >
-                    ✗ رفض
-                  </button>
-                  <button 
-                    className="action-btn modify-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEditModal(ad);
-                    }}
-                  >
-                    ✏️ تعديل البيانات
-                  </button>
+                  <button className="action-btn approve-btn" onClick={(e) => { e.stopPropagation(); handleAction(ad.id, 'approve'); }}>✓ موافقة</button>
+                  <button className="action-btn reject-btn" onClick={(e) => { e.stopPropagation(); openReasonModal('reject', ad.id); }}>✗ رفض</button>
+                  <button className="action-btn package-btn" onClick={(e) => { e.stopPropagation(); openPackagesForUserId(ad.source?.user?.id); }}> عمل باقة</button>
+                  <button className="action-btn contact-btn" onClick={(e) => { e.stopPropagation(); contactAdvertiser(ad); }}> تواصل</button>
                 </div>
               </div>
             ))}
@@ -951,15 +589,13 @@ export default function ModerationPage() {
           )}
         </div>
 
-        {visibleAds.length > 0 && (
+        {(totalAdsCount > 0 && visibleAds.length > 0) && (
         <div className="details-pane">
           {selectedAd ? (
             <div className="ad-details">
               <div className="details-header">
                 <h2>تفاصيل الإعلان</h2>
-                <div className="ad-status-large">
-                  {getStatusText(selectedAd.status)}
-                </div>
+                <div className="ad-status-large">{getStatusText(selectedAd.status)}</div>
               </div>
 
               <div className="details-content">
@@ -994,38 +630,21 @@ export default function ModerationPage() {
                 <div className="detail-section">
                   <h3>بيانات المعلن</h3>
                   <div className="detail-grid">
-                    <div className="detail-item">
-                      <label>رقم المعلن:</label>
-                      <span>{selectedAd?.source?.user?.id ?? '-'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>الاسم:</label>
-                      <span>{selectedAd?.source?.user?.name || 'غير متوفر'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>رقم الهاتف:</label>
-                      <span>{formatPhoneTrailingPlus(selectedAd?.source?.user?.phone, selectedAd?.source?.country_code)}</span>
-                    </div>
+                    <div className="detail-item"><label>رقم المعلن:</label><span>{selectedAd?.source?.user?.id ?? '-'}</span></div>
+                    <div className="detail-item"><label>الاسم:</label><span>{selectedAd?.source?.user?.name || 'غير متوفر'}</span></div>
+                    <div className="detail-item"><label>رقم الهاتف:</label><span>{formatPhoneTrailingPlus(selectedAd?.source?.user?.phone, selectedAd?.source?.country_code)}</span></div>
                   </div>
                 </div>
 
                 <div className="detail-section">
                   <h3>معلومات التواصل</h3>
                   <div className="detail-grid">
-                    <div className="detail-item">
-                      <label>الهاتف للتواصل:</label>
-                      <span>{formatPhoneTrailingPlus(selectedAd?.source?.contact_phone, selectedAd?.source?.country_code)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>واتساب:</label>
-                      <span>{formatPhoneTrailingPlus(selectedAd?.source?.whatsapp_phone, selectedAd?.source?.country_code)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>تاريخ الإنشاء:</label>
-                      <span>{selectedAd.source?.created_at ? formatDateAr(selectedAd.source.created_at) : selectedAd.submittedAt}</span>
-                    </div>
+                    <div className="detail-item"><label>الهاتف للتواصل:</label><span>{formatPhoneTrailingPlus(selectedAd?.source?.contact_phone, selectedAd?.source?.country_code)}</span></div>
+                    <div className="detail-item"><label>واتساب:</label><span>{formatPhoneTrailingPlus(selectedAd?.source?.whatsapp_phone, selectedAd?.source?.country_code)}</span></div>
+                    <div className="detail-item"><label>تاريخ الإنشاء:</label><span>{selectedAd.source?.created_at ? formatDateAr(selectedAd.source.created_at) : selectedAd.submittedAt}</span></div>
                   </div>
                 </div>
+
                 <div className="detail-section">
                   <h3>خصائص الإعلان</h3>
                   <div className="detail-grid">
@@ -1035,15 +654,9 @@ export default function ModerationPage() {
                         <span>{String(val)}</span>
                       </div>
                     ))}
-                    {/* {selectedAd?.source?.make_id && (
-                      <div className="detail-item"><label>معرّف الماركة:</label><span>{selectedAd?.source?.make_id}</span></div>
-                    )} */}
                     {selectedAd?.source?.make && (
                       <div className="detail-item"><label>الماركة:</label><span>{selectedAd?.source?.make}</span></div>
                     )}
-                    {/* {selectedAd?.source?.model_id && (
-                      <div className="detail-item"><label>معرّف الموديل:</label><span>{selectedAd?.source?.model_id}</span></div>
-                    )} */}
                     {selectedAd?.source?.model && (
                       <div className="detail-item"><label>الموديل:</label><span>{selectedAd?.source?.model}</span></div>
                     )}
@@ -1099,7 +712,6 @@ export default function ModerationPage() {
                       </div>
                     );
                   })()}
-                  
                 </div>
 
                 <div className="detail-section">
@@ -1112,24 +724,10 @@ export default function ModerationPage() {
                 </div>
 
                 <div className="detail-actions">
-                  <button 
-                    className="detail-action-btn approve-btn"
-                    onClick={() => handleAction(selectedAd.id, 'approve')}
-                  >
-                    موافقة على الإعلان
-                  </button>
-                  <button 
-                    className="detail-action-btn reject-btn"
-                    onClick={() => openReasonModal('reject', selectedAd.id)}
-                  >
-                     رفض الإعلان
-                  </button>
-                  <button 
-                    className="detail-action-btn modify-btn"
-                    onClick={() => openEditModal(selectedAd)}
-                  >
-                     تعديل البيانات
-                  </button>
+                  <button className="detail-action-btn approve-btn" onClick={() => handleAction(selectedAd.id, 'approve')}>موافقة  </button>
+                  <button className="detail-action-btn reject-btn" onClick={() => openReasonModal('reject', selectedAd.id)}>رفض </button>
+                  <button className="detail-action-btn package-btn" onClick={() => openPackagesForUserId(selectedAd.source?.user?.id)}> عمل باقة</button>
+                  <button className="detail-action-btn contact-btn" onClick={() => contactAdvertiser(selectedAd)}> التواصل</button>
                 </div>
               </div>
             </div>
@@ -1144,7 +742,6 @@ export default function ModerationPage() {
         )}
       </div>
 
-      {/* Image Modal */}
       {showImageModal && imageModalAdId && (
         <div className="modal-overlay" onClick={closeImageModal}>
           <div className="image-modal gallery-modal" onClick={(e) => e.stopPropagation()}>
@@ -1176,61 +773,33 @@ export default function ModerationPage() {
         </div>
       )}
 
-      {/* Reason Modal */}
       {showReasonModal && (
         <div className="modal-overlay" onClick={closeReasonModal}>
           <div className="reason-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>
-                {actionType === 'reject' ? 'سبب الرفض' : 'سبب طلب التعديل'}
-              </h3>
+              <h3>{reasonType === 'reject' ? 'سبب الرفض' : 'سبب طلب التعديل'}</h3>
               <button className="modal-close" onClick={closeReasonModal}>✕</button>
             </div>
-            
             <div className="modal-content">
               <div className="reason-templates">
                 <h4>أسباب جاهزة:</h4>
                 {rejectionReasons.map((reason, index) => (
-                  <button 
-                    key={index}
-                    className="reason-btn"
-                    onClick={() => setCustomReason(reason)}
-                  >
-                    {reason}
-                  </button>
+                  <button key={index} className="reason-btn" onClick={() => setCustomReason(reason)}>{reason}</button>
                 ))}
               </div>
-              
               <div className="custom-reason">
                 <label>سبب مخصص:</label>
-                <textarea 
-                  value={customReason}
-                  onChange={(e) => setCustomReason(e.target.value)}
-                  placeholder="اكتب السبب هنا..."
-                  rows={4}
-                />
+                <textarea value={rejectionReason || customReason} onChange={(e) => setCustomReason(e.target.value)} placeholder="اكتب السبب هنا..." rows={4} />
               </div>
             </div>
-            
             <div className="modal-actions">
-              <button 
-                className="confirm-btn"
-                onClick={() => reasonTargetAdId && handleAction(reasonTargetAdId, actionType, customReason)}
-              >
-                تأكيد
-              </button>
-              <button 
-                className="cancel-btn"
-                onClick={closeReasonModal}
-              >
-                إلغاء
-              </button>
+              <button className="confirm-btn" onClick={() => reasonTargetAdId && handleAction(reasonTargetAdId, reasonType, customReason)}>تأكيد</button>
+              <button className="cancel-btn" onClick={closeReasonModal}>إلغاء</button>
             </div>
           </div>
         </div>
       )}
-      
-      {/* Edit Modal */}
+
       {showEditModal && editTargetAdId && (
         <div className="modal-overlay" onClick={closeEditModal}>
           <div className="edit-modal" onClick={(e) => e.stopPropagation()}>
@@ -1238,185 +807,71 @@ export default function ModerationPage() {
               <h3>تعديل بيانات الإعلان</h3>
               <button className="modal-close" onClick={closeEditModal}>✕</button>
             </div>
-
             <div className="modal-content">
               <div className="edit-form">
-                {/* <div className="form-group">
-                  <label>العنوان</label>
-                  <input 
-                    type="text" 
-                    value={editForm.title}
-                    onChange={(e) => handleEditChange('title', e.target.value)}
-                  />
-                </div> */}
                 <div className="form-group">
                   <label>الوصف</label>
-                  <textarea 
-                    rows={4}
-                    value={editForm.description}
-                    onChange={(e) => handleEditChange('description', e.target.value)}
-                  />
+                  <textarea rows={4} value={editForm.description} onChange={(e) => handleEditChange('description', e.target.value)} />
                 </div>
                 <div className="form-group">
                   <label>التصنيف</label>
-                  <input 
-                    type="text" 
-                    value={editForm.category}
-                    onChange={(e) => handleEditChange('category', e.target.value)}
-                  />
+                  <input type="text" value={editForm.category} onChange={(e) => handleEditChange('category', e.target.value)} />
                 </div>
                 <div className="form-grid">
                   <div className="form-group">
                     <label>السعر</label>
-                    <input 
-                      type="text" 
-                      value={editForm.price}
-                      onChange={(e) => handleEditChange('price', e.target.value)}
-                    />
+                    <input type="text" value={editForm.price} onChange={(e) => handleEditChange('price', e.target.value)} />
                   </div>
                   <div className="form-group">
                     <label>العملة</label>
-                    <input 
-                      type="text" 
-                      value={editForm.currency}
-                      onChange={(e) => handleEditChange('currency', e.target.value)}
-                    />
+                    <input type="text" value={editForm.currency} onChange={(e) => handleEditChange('currency', e.target.value)} />
                   </div>
                 </div>
                 <div className="form-grid">
-                  <div className="form-group">
-                    <label>المحافظة</label>
-                    <input type="text" value={editForm.governorate} onChange={(e) => handleEditChange('governorate', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>المدينة</label>
-                    <input type="text" value={editForm.city} onChange={(e) => handleEditChange('city', e.target.value)} />
-                  </div>
+                  <div className="form-group"><label>المحافظة</label><input type="text" value={editForm.governorate} onChange={(e) => handleEditChange('governorate', e.target.value)} /></div>
+                  <div className="form-group"><label>المدينة</label><input type="text" value={editForm.city} onChange={(e) => handleEditChange('city', e.target.value)} /></div>
                 </div>
                 <div className="form-grid">
-                  <div className="form-group">
-                    <label>العنوان</label>
-                    <input type="text" value={editForm.address} onChange={(e) => handleEditChange('address', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>كود الدولة</label>
-                    <input type="text" value={editForm.country_code} onChange={(e) => handleEditChange('country_code', e.target.value)} />
-                  </div>
+                  <div className="form-group"><label>العنوان</label><input type="text" value={editForm.address} onChange={(e) => handleEditChange('address', e.target.value)} /></div>
+                  <div className="form-group"><label>كود الدولة</label><input type="text" value={editForm.country_code} onChange={(e) => handleEditChange('country_code', e.target.value)} /></div>
                 </div>
                 <div className="form-grid">
-                  <div className="form-group">
-                    <label>خط العرض (LAT)</label>
-                    <input type="text" value={editForm.lat} onChange={(e) => handleEditChange('lat', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>خط الطول (LNG)</label>
-                    <input type="text" value={editForm.lng} onChange={(e) => handleEditChange('lng', e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>الحالة</label>
-                    <ManagedSelect 
-                      options={statusOptions}
-                      value={editForm.status}
-                      onChange={(v) => handleEditChange('status', v)}
-                      placeholder="اختر الحالة"
-                      className="edit-select-wide"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>نوع الخطة</label>
-                    <ManagedSelect 
-                      options={planTypeOptions}
-                      value={editForm.plan_type}
-                      onChange={(v) => handleEditChange('plan_type', v)}
-                      placeholder="اختر نوع الخطة"
-                      className="edit-select-wide"
-                    />
-                  </div>
+                  <div className="form-group"><label>خط العرض (LAT)</label><input type="text" value={editForm.lat} onChange={(e) => handleEditChange('lat', e.target.value)} /></div>
+                  <div className="form-group"><label>خط الطول (LNG)</label><input type="text" value={editForm.lng} onChange={(e) => handleEditChange('lng', e.target.value)} /></div>
                 </div>
                 <div className="form-grid">
-                  <div className="form-group">
-                    <label>طريقة النشر</label>
-                    <input type="text" value={editForm.publish_via} onChange={(e) => handleEditChange('publish_via', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>حالة الدفع</label>
-                    <ManagedSelect 
-                      options={paymentOptions}
-                      value={editForm.isPayment ? '1' : '0'}
-                      onChange={(v) => handleEditChange('isPayment', v === '1')}
-                      placeholder="اختر حالة الدفع"
-                      className="edit-select-wide"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>الهاتف للتواصل</label>
-                    <input type="text" value={editForm.contact_phone} onChange={(e) => handleEditChange('contact_phone', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>واتساب</label>
-                    <input type="text" value={editForm.whatsapp_phone} onChange={(e) => handleEditChange('whatsapp_phone', e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>الماركة</label>
-                    <input type="text" value={editForm.make} onChange={(e) => handleEditChange('make', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>معرّف الماركة</label>
-                    <input type="text" value={editForm.make_id} onChange={(e) => handleEditChange('make_id', e.target.value)} />
-                  </div>
+                  <div className="form-group"><label>الحالة</label><ManagedSelect options={statusOptions} value={editForm.status} onChange={(v) => handleEditChange('status', v)} placeholder="اختر الحالة" className="edit-select-wide" /></div>
+                  <div className="form-group"><label>نوع الخطة</label><ManagedSelect options={planTypeOptions} value={editForm.plan_type} onChange={(v) => handleEditChange('plan_type', v)} placeholder="اختر نوع الخطة" className="edit-select-wide" /></div>
                 </div>
                 <div className="form-grid">
-                  <div className="form-group">
-                    <label>الموديل</label>
-                    <input type="text" value={editForm.model} onChange={(e) => handleEditChange('model', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>معرّف الموديل</label>
-                    <input type="text" value={editForm.model_id} onChange={(e) => handleEditChange('model_id', e.target.value)} />
-                  </div>
+                  <div className="form-group"><label>طريقة النشر</label><input type="text" value={editForm.publish_via} onChange={(e) => handleEditChange('publish_via', e.target.value)} /></div>
+                  <div className="form-group"><label>حالة الدفع</label><ManagedSelect options={paymentOptions} value={editForm.isPayment ? '1' : '0'} onChange={(v) => handleEditChange('isPayment', v === '1')} placeholder="اختر حالة الدفع" className="edit-select-wide" /></div>
                 </div>
-
                 <div className="form-grid">
-                  <div className="form-group">
-                    <label>عدد المشاهدات</label>
-                    <input type="number" value={editForm.views} onChange={(e) => handleEditChange('views', e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label>الترتيب</label>
-                    <input type="number" value={editForm.rank} onChange={(e) => handleEditChange('rank', e.target.value)} />
-                  </div>
+                  <div className="form-group"><label>الهاتف للتواصل</label><input type="text" value={editForm.contact_phone} onChange={(e) => handleEditChange('contact_phone', e.target.value)} /></div>
+                  <div className="form-group"><label>واتساب</label><input type="text" value={editForm.whatsapp_phone} onChange={(e) => handleEditChange('whatsapp_phone', e.target.value)} /></div>
                 </div>
-
-                <div className="form-group">
-                  <label>تعليق الإدمن</label>
-                  <textarea rows={3} value={editForm.admin_comment} onChange={(e) => handleEditChange('admin_comment', e.target.value)} />
+                <div className="form-grid">
+                  <div className="form-group"><label>الماركة</label><input type="text" value={editForm.make} onChange={(e) => handleEditChange('make', e.target.value)} /></div>
+                  <div className="form-group"><label>معرّف الماركة</label><input type="text" value={editForm.make_id} onChange={(e) => handleEditChange('make_id', e.target.value)} /></div>
                 </div>
-
+                <div className="form-grid">
+                  <div className="form-group"><label>الموديل</label><input type="text" value={editForm.model} onChange={(e) => handleEditChange('model', e.target.value)} /></div>
+                  <div className="form-group"><label>معرّف الموديل</label><input type="text" value={editForm.model_id} onChange={(e) => handleEditChange('model_id', e.target.value)} /></div>
+                </div>
+                <div className="form-grid">
+                  <div className="form-group"><label>عدد المشاهدات</label><input type="number" value={editForm.views} onChange={(e) => handleEditChange('views', e.target.value)} /></div>
+                  <div className="form-group"><label>الترتيب</label><input type="number" value={editForm.rank} onChange={(e) => handleEditChange('rank', e.target.value)} /></div>
+                </div>
+                <div className="form-group"><label>تعليق الإدمن</label><textarea rows={3} value={editForm.admin_comment} onChange={(e) => handleEditChange('admin_comment', e.target.value)} /></div>
                 <div className="form-group">
                   <label>الغلاف</label>
                   <div className="edit-image-item main-cover-edit" style={{ marginBottom: '10px' }}>
-                    <Image 
-                      src={editForm.main_image_file ? URL.createObjectURL(editForm.main_image_file) : (editForm.main_image_url || '/nas-masr.png')} 
-                      alt="الغلاف" 
-                      width={120} 
-                      height={90} 
-                      className="cover-preview"
-                      style={{ objectFit: 'cover', borderRadius: '4px', border: '1px solid #ddd' }}
-                    />
+                    <Image src={editForm.main_image_file ? URL.createObjectURL(editForm.main_image_file) : (editForm.main_image_url || '/nas-masr.png')} alt="الغلاف" width={120} height={90} className="cover-preview" style={{ objectFit: 'cover', borderRadius: '4px', border: '1px solid #ddd' }} />
                     <button className="image-action-btn edit-btn" style={{ marginRight: '10px' }} onClick={() => handleImageEditClick('main')}>تعديل</button>
                   </div>
                   <input type="text" placeholder="رابط الغلاف" value={editForm.main_image_url} onChange={(e) => handleEditChange('main_image_url', e.target.value)} />
                 </div>
-
                 <div className="form-group">
                   <label>الصور</label>
                   <div className="edit-images">
@@ -1428,31 +883,19 @@ export default function ModerationPage() {
                     ))}
                   </div>
                   <div className="add-image-row">
-                    <input 
-                      type="text" 
-                      placeholder="مسار الصورة (URL أو /public)"
-                      value={newImageUrl}
-                      onChange={(e) => setNewImageUrl(e.target.value)}
-                    />
+                    <input type="text" placeholder="مسار الصورة (URL أو /public)" value={newImageUrl} onChange={(e) => setNewImageUrl(e.target.value)} />
                     <input type="file" accept="image/*" onChange={(e) => setNewImageFile(e.target.files?.[0] || null)} />
                     <button className="tool-btn" onClick={addImageToEditForm}>إضافة صورة</button>
                   </div>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    style={{ display: 'none' }} 
-                    accept="image/*" 
-                    onChange={handleFileChange}
-                  />
+                  <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*" onChange={handleFileChange} />
                 </div>
-
                 <div className="form-group">
                   <label>خصائص الإعلان</label>
                   <div className="attributes-editor">
                     {Object.entries(editForm.attributes || {}).map(([key, val]) => (
                       <div key={key} className="attribute-row">
                         <span className="attr-key">{translateAttributeKey(key)}</span>
-                        <input type="text" value={val || ''} onChange={(e) => handleAttributeValueChange(key, e.target.value)} />
+                        <input type="text" value={val || ''} onChange={(e) => setEditForm(prev => ({ ...prev, attributes: { ...prev.attributes, [key]: e.target.value } }))} />
                         <button className="image-action-btn delete-btn" onClick={() => removeAttributeFromEditForm(key)}>حذف</button>
                       </div>
                     ))}
@@ -1465,7 +908,6 @@ export default function ModerationPage() {
                 </div>
               </div>
             </div>
-
             <div className="modal-actions">
               <button className="confirm-btn" onClick={saveEditChanges}>حفظ التعديلات</button>
               <button className="cancel-btn" onClick={closeEditModal}>إلغاء</button>
@@ -1474,7 +916,6 @@ export default function ModerationPage() {
         </div>
       )}
 
-      {/* Mobile Modal */}
       {showMobileModal && selectedAd && (
         <div className="modal-overlay" onClick={closeMobileModal}>
           <div className="mobile-modal" onClick={(e) => e.stopPropagation()}>
@@ -1483,106 +924,45 @@ export default function ModerationPage() {
               <button className="modal-close" onClick={closeMobileModal}>✕</button>
             </div>
             <div className="modal-content">
-              <div className="mobile-ad-status">
-                {getStatusText(selectedAd.status)}
-              </div>
-              
+              <div className="mobile-ad-status">{getStatusText(selectedAd.status)}</div>
               <div className="mobile-detail-section">
                 <h4>معلومات الإعلان</h4>
                 <div className="mobile-detail-grid">
-                  <div className="mobile-detail-item">
-                    <label>العنوان:</label>
-                    <span>{selectedAd.title}</span>
-                  </div>
-                  <div className="mobile-detail-item">
-                    <label>التصنيف:</label>
-                    <span>{selectedAd.category}</span>
-                  </div>
-                  <div className="mobile-detail-item">
-                    <label>السعر:</label>
-                    <span>{selectedAd.price}</span>
-                  </div>
-                  <div className="mobile-detail-item">
-                    <label>الموقع:</label>
-                    <span>{selectedAd.location}</span>
-                  </div>
-                  <div className="mobile-detail-item full-width">
-                    <label>الوصف:</label>
-                    <span>{selectedAd.description}</span>
-                  </div>
+                  <div className="mobile-detail-item"><label>العنوان:</label><span>{selectedAd.title}</span></div>
+                  <div className="mobile-detail-item"><label>التصنيف:</label><span>{selectedAd.category}</span></div>
+                  <div className="mobile-detail-item"><label>السعر:</label><span>{selectedAd.price}</span></div>
+                  <div className="mobile-detail-item"><label>الموقع:</label><span>{selectedAd.location}</span></div>
+                  <div className="mobile-detail-item full-width"><label>الوصف:</label><span>{selectedAd.description}</span></div>
                 </div>
               </div>
-
               <div className="mobile-detail-section">
                 <h4>معلومات المرسل</h4>
                 <div className="mobile-detail-grid">
-                  <div className="mobile-detail-item">
-                    <label>الاسم:</label>
-                    <span>{selectedAd.submitterName}</span>
-                  </div>
-                  <div className="mobile-detail-item">
-                    <label>الهاتف:</label>
-                    <span>{selectedAd.submitterPhone}</span>
-                  </div>
-                  <div className="mobile-detail-item">
-                    <label>تاريخ الإرسال:</label>
-                    <span>{selectedAd.submittedAt}</span>
-                  </div>
+                  <div className="mobile-detail-item"><label>الاسم:</label><span>{selectedAd.submitterName}</span></div>
+                  <div className="mobile-detail-item"><label>الهاتف:</label><span>{selectedAd.submitterPhone}</span></div>
+                  <div className="mobile-detail-item"><label>تاريخ الإرسال:</label><span>{selectedAd.submittedAt}</span></div>
                 </div>
               </div>
-
               <div className="mobile-detail-section">
                 <h4>الصور ({selectedAd.images.length})</h4>
                 <div className="mobile-images-grid">
                   {selectedAd.images.map((image, index) => (
                     <div key={index} className="mobile-image-container">
-                      <Image 
-                        src={image} 
-                        alt={`صورة ${index + 1}`}
-                        width={100}
-                        height={75}
-                        className="mobile-detail-image"
-                        onClick={() => openImageModal(selectedAd.id, index)}
-                      />
+                      <Image src={image} alt={`صورة ${index + 1}`} width={100} height={75} className="mobile-detail-image" onClick={() => openImageModal(selectedAd.id, index)} />
                     </div>
                   ))}
                 </div>
               </div>
-
               <div className="mobile-detail-actions">
-                <button 
-                  className="mobile-action-btn approve-btn"
-                  onClick={() => {
-                    handleAction(selectedAd.id, 'approve');
-                    closeMobileModal();
-                  }}
-                >
-                  ✓ موافقة
-                </button>
-                <button 
-                  className="mobile-action-btn reject-btn"
-                  onClick={() => {
-                    openReasonModal('reject', selectedAd.id);
-                    closeMobileModal();
-                  }}
-                >
-                  ✗ رفض
-                </button>
-                <button 
-                  className="mobile-action-btn modify-btn"
-                  onClick={() => {
-                    openEditModal(selectedAd);
-                    closeMobileModal();
-                  }}
-                >
-                  ✏️ تعديل
-                </button>
+                <button className="mobile-action-btn approve-btn" onClick={() => { handleAction(selectedAd.id, 'approve'); closeMobileModal(); }}>✓ موافقة</button>
+                <button className="mobile-action-btn reject-btn" onClick={() => { openReasonModal('reject', selectedAd.id); closeMobileModal(); }}>✗ رفض</button>
+                <button className="mobile-action-btn package-btn" onClick={() => { openPackagesForUserId(selectedAd.source?.user?.id); closeMobileModal(); }}>💼 باقة</button>
+                <button className="mobile-action-btn contact-btn" onClick={() => { contactAdvertiser(selectedAd); closeMobileModal(); }}>📞 تواصل</button>
               </div>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
 }

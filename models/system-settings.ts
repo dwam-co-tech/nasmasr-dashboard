@@ -10,6 +10,8 @@ export interface SystemSettingsPayload {
   email?: string;
   show_phone?: boolean;
   featured_users_count?: number;
+  free_ads_count?: number;
+  free_ads_max_price?: number;
 }
 
 export interface SystemSettingsData {
@@ -24,9 +26,13 @@ export interface SystemSettingsData {
   email: string;
   show_phone: boolean;
   featured_users_count: number;
+  free_ads_count?: number;
+  free_ads_max_price?: number;
 }
 
 export interface SystemSettingsResponse {
-  status: string;
-  data: SystemSettingsData;
+  status?: string;
+  data?: SystemSettingsData;
+  free_ads_count?: number;
+  free_ads_max_price?: number;
 }

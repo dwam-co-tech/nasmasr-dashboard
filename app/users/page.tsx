@@ -6,7 +6,7 @@ import ManagedSelect from '@/components/ManagedSelect';
 import { CATEGORY_LABELS_AR } from '@/constants/categories';
 import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured } from '@/services/users';
 import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
-import { UsersMeta, AssignUserPackagePayload } from '@/models/users';
+import { UsersMeta, AssignUserPackagePayload, UsersSummaryResponse } from '@/models/users';
 
 interface User {
   id: string;
@@ -105,10 +105,21 @@ export default function UsersPage() {
   const [subscriptionForm, setSubscriptionForm] = useState<UserSubscriptionForm>({ title: '', annualFee: 0, paidAmount: 0 });
   type TransactionItem = { title: string; annualFee: number; paidAmount: number; date: string };
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
+  const [allUsersCache, setAllUsersCache] = useState<User[] | null>(null);
+  const isFilterActive = (roleFilter !== 'all') || (searchTerm.trim() !== '');
+
+  const formatDateDDMMYYYY = (s?: string | null) => {
+    const t = String(s || '').trim();
+    if (!t) return '-';
+    const m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return t;
+    return `${m[3]}-${m[2]}-${m[1]}`;
+  };
 
   useEffect(() => {
     const load = async () => {
       try {
+        if (isFilterActive) return;
         const resp = await fetchUsersSummaryPage(currentPage);
         const mapped = resp.users.map(u => ({
           id: String(u.id),
@@ -130,7 +141,19 @@ export default function UsersPage() {
       }
     };
     load();
-  }, [currentPage]);
+  }, [currentPage, isFilterActive]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('openPackagesForUserId');
+      if (!raw || !users.length) return;
+      const target = users.find(u => String(u.id) === String(raw));
+      if (target) {
+        openPackagesModal(target);
+        localStorage.removeItem('openPackagesForUserId');
+      }
+    } catch {}
+  }, [users]);
 
   useEffect(() => {
     if (!selectedUser) return;
@@ -522,10 +545,66 @@ export default function UsersPage() {
     setToasts(prev => prev.filter(toast => toast.id !== id));
   };
 
-  // Reset to first page when search changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, roleFilter]);
+
+  useEffect(() => {
+    const loadAllIfNeeded = async () => {
+      try {
+        if (!isFilterActive) {
+          return;
+        }
+        if (allUsersCache && allUsersCache.length > 0) {
+          setUsers(allUsersCache);
+          setUsersMeta(null);
+          return;
+        }
+        const first = await fetchUsersSummaryPage(1);
+        let aggregated: User[] = first.users.map(u => ({
+          id: String(u.id),
+          name: u.name ?? '',
+          phone: u.phone,
+          userCode: String(u.id),
+          status: u.status === 'active' ? 'active' : 'banned',
+          registrationDate: u.registered_at,
+          adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
+          role: u.role,
+          lastLogin: u.registered_at,
+          phoneVerified: false,
+        } as User));
+        const last = Math.max(1, Number(first.meta?.last_page || 1));
+        if (last > 1) {
+          const promises: Promise<UsersSummaryResponse>[] = [];
+          for (let p = 2; p <= last; p++) {
+            promises.push(fetchUsersSummaryPage(p));
+          }
+          const pages = await Promise.all(promises);
+          pages.forEach(resp => {
+            const mapped = resp.users.map(u => ({
+              id: String(u.id),
+              name: u.name ?? '',
+              phone: u.phone,
+              userCode: String(u.id),
+              status: u.status === 'active' ? 'active' : 'banned',
+              registrationDate: u.registered_at,
+              adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
+              role: u.role,
+              lastLogin: u.registered_at,
+              phoneVerified: false,
+            } as User));
+            aggregated = aggregated.concat(mapped);
+          });
+        }
+        setAllUsersCache(aggregated);
+        setUsers(aggregated);
+        setUsersMeta(null);
+      } catch (e) {
+        showToast('تعذر تحميل جميع المستخدمين للفلاتر', 'error');
+      }
+    };
+    loadAllIfNeeded();
+  }, [isFilterActive]);
 
   // Reset edit mode when switching selected user
   useEffect(() => {
@@ -977,9 +1056,9 @@ export default function UsersPage() {
       'كود المستخدم': u.userCode,
       'الحالة': u.status === 'active' ? 'نشط' : 'محظور',
       'تاريخ التسجيل': u.registrationDate,
-      'عدد الإعلانات': u.adsCount,
+      // 'عدد الإعلانات': u.adsCount,
       'الدور': u.role,
-      'آخر تسجيل دخول': u.lastLogin,
+      // 'آخر تسجيل دخول': u.lastLogin,
     }));
 
     try {
@@ -1151,7 +1230,7 @@ export default function UsersPage() {
                       <span>{selectedUser.registrationDate}</span>
                     )}
                   </div>
-                  <div className="data-item">
+                  {/* <div className="data-item">
                     <label>آخر تسجيل دخول:</label>
                     {isEditing ? (
                       <input
@@ -1165,7 +1244,7 @@ export default function UsersPage() {
                     ) : (
                       <span>{selectedUser.lastLogin}</span>
                     )}
-                  </div>
+                  </div> */}
                   <div className="data-item">
                     <label>الدور:</label>
                     {isEditing ? (
@@ -1236,7 +1315,7 @@ export default function UsersPage() {
                           <div className="ad-details">
                             <p><span className="detail-label">القسم:</span> <span className="category-badge">{ad.category}</span></p>
                             <p><span className="detail-label">الحالة:</span> <span className={`status-badge ${ad.status === 'منشور' ? 'published' : 'pending'}`}>{ad.status}</span></p>
-                            <p><span className="detail-label">تاريخ النشر:</span> {ad.publishDate}</p>
+                            <p><span className="detail-label">تاريخ النشر:</span> {formatDateDDMMYYYY(ad.publishDate)}</p>
                           </div>
                         </div>
                       </div>
@@ -1268,13 +1347,13 @@ export default function UsersPage() {
                         <div className="ad-details-meta">
                           <span className="category-badge">{adInModal.category}</span>
                           <span className={`status-badge ${adInModal.status === 'منشور' ? 'published' : 'pending'}`}>{adInModal.status}</span>
-                          <span className="publish-date">{adInModal.publishDate}</span>
+                          <span className="publish-date">{formatDateDDMMYYYY(adInModal.publishDate)}</span>
                         </div>
                         <div className="ad-details-rows">
                           <div className="detail-row"><span className="detail-label">القسم</span><span className="detail-value">{adInModal.category}</span></div>
                           <div className="detail-row"><span className="detail-label">القسم (slug)</span><span className="detail-value">{adInModal.categorySlug}</span></div>
                           <div className="detail-row"><span className="detail-label">الحالة</span><span className="detail-value">{adInModal.status}</span></div>
-                          <div className="detail-row"><span className="detail-label">تاريخ النشر</span><span className="detail-value">{adInModal.publishDate}</span></div>
+                          <div className="detail-row"><span className="detail-label">تاريخ النشر</span><span className="detail-value">{formatDateDDMMYYYY(adInModal.publishDate)}</span></div>
                           <div className="detail-row"><span className="detail-label">نوع العقار</span><span className="detail-value">{adInModal.attributes?.property_type ?? '-'}</span></div>
                           <div className="detail-row"><span className="detail-label">نوع العقد</span><span className="detail-value">{adInModal.attributes?.contract_type ?? '-'}</span></div>
                           {/* <div className="detail-row"><span className="detail-label">القسم الرئيسي</span><span className="detail-value">{adInModal.attributes?.main_category ?? '-'}</span></div>
@@ -1345,7 +1424,7 @@ export default function UsersPage() {
                     <div className="transaction-item" key={i}>
                       <span>{t.title || '—'}</span>
                       <span>{`قيمة الاشتراك: ${t.annualFee} | المدفوع: ${t.paidAmount} جنيه`}</span>
-                      <span>{t.date}</span>
+                      <span>{formatDateDDMMYYYY(t.date)}</span>
                     </div>
                   ))}
                   <div className="transaction-item">
@@ -1479,7 +1558,7 @@ export default function UsersPage() {
                       onChange={(e) => handleNewUserChange('registrationDate', e.target.value)}
                     />
                   </div>
-                  <div className="form-group">
+                  {/* <div className="form-group">
                     <label>آخر تسجيل دخول</label>
                     <input
                       type="date"
@@ -1487,8 +1566,8 @@ export default function UsersPage() {
                       value={newUserForm.lastLogin}
                       onChange={(e) => handleNewUserChange('lastLogin', e.target.value)}
                     />
-                  </div>
-                  <div className="form-group">
+                  </div> */}
+                  {/* <div className="form-group">
                     <label>عدد الإعلانات</label>
                     <input
                       type="number"
@@ -1497,7 +1576,7 @@ export default function UsersPage() {
                       value={newUserForm.adsCount}
                       onChange={(e) => handleNewUserChange('adsCount', Number(e.target.value))}
                     />
-                  </div>
+                  </div> */}
                 </div>
               </div>
             </div>
@@ -1898,7 +1977,7 @@ export default function UsersPage() {
                       {user.status === 'active' ? 'نشط' : 'محظور'}
                     </span>
                   </td>
-                  <td className="registration-date">{user.registrationDate}</td>
+                  <td className="registration-date">{formatDateDDMMYYYY(user.registrationDate)}</td>
                   <td className="ads-count">{user.adsCount}</td>
                   <td className="user-role">{user.role}</td>
                   <td>
@@ -2069,7 +2148,7 @@ export default function UsersPage() {
                   </div>
                   <div className="info-item">
                     <span className="info-label">تاريخ التسجيل:</span>
-                    <span className="info-value">{user.registrationDate}</span>
+                    <span className="info-value">{formatDateDDMMYYYY(user.registrationDate)}</span>
                   </div>
                   <div className="info-item">
                     <span className="info-label">عدد الإعلانات:</span>

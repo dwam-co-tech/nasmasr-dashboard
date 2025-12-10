@@ -2,17 +2,18 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import Image from "next/image";
+import { fetchSupportInbox, fetchSupportConversation, replySupport, markSupportConversationRead, fetchSupportStats } from "@/services/supportInbox";
 import { fetchUsersSummary } from "@/services/users";
+import type { SupportInboxItem, SupportStatsResponse } from "@/models/support-inbox";
 
-type ChatUser = { id: string; name: string; userCode: string; phone: string; avatar?: string };
-type ChatMessage = { id: string; sender: "admin" | "user"; content: string; time: string; status?: "sent" | "delivered" };
+type ChatMessage = { id: string; sender: "admin" | "user"; content: string; time: string; status?: "sent" | "delivered"; srcId?: number };
 type QuickReply = { id: string; title: string; content: string };
 
 export default function MessagesPage() {
-  const [users, setUsers] = useState<ChatUser[]>([]);
+  const [inboxItems, setInboxItems] = useState<SupportInboxItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [messagesByUser, setMessagesByUser] = useState<Record<string, ChatMessage[]>>({});
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [messageInput, setMessageInput] = useState("");
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -20,6 +21,14 @@ export default function MessagesPage() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentsPanel, setShowAttachmentsPanel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [designMode, setDesignMode] = useState(true);
+  const chatPaneRef = useRef<HTMLDivElement | null>(null);
+  const msgIdRef = useRef(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<number | string | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const [supportStats, setSupportStats] = useState<SupportStatsResponse | null>(null);
   const quickReplies: QuickReply[] = [
     { id: "qr1", title: "تحية", content: "مرحبًا، كيف يمكنني مساعدتك؟" },
     { id: "qr2", title: "استلام الطلب", content: "تم استلام طلبك وجاري المراجعة." },
@@ -34,58 +43,177 @@ export default function MessagesPage() {
 
   useEffect(() => {
     const load = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const resp = await fetchUsersSummary();
-        const mapped: ChatUser[] = resp.users.map((u: any) => ({
-          id: String(u.id),
-          name: u.name || "مستخدم",
-          userCode: u.user_code,
-          phone: u.phone || "",
-          avatar: "/profile.png",
-        }));
-        setUsers(mapped);
-        const initial: Record<string, ChatMessage[]> = {};
-        mapped.forEach((u, i) => {
-          initial[u.id] = [
-            { id: `${u.id}-m1`, sender: "user", content: "السلام عليكم", time: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }) },
-            { id: `${u.id}-m2`, sender: "admin", content: "وعليكم السلام، أهلاً بك", time: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }), status: "delivered" },
-          ];
-          if (i === 0) setSelectedUserId(u.id);
-        });
-        setMessagesByUser(initial);
-      } catch {}
+        const resp = await fetchSupportInbox();
+        const items = (resp?.data ?? []).filter(Boolean) as SupportInboxItem[];
+        setInboxItems(items);
+        if (items.length > 0) setSelectedConversationId(items[0].conversation_id);
+      } catch (e) {
+        setError((e as Error)?.message || "تعذر جلب قائمة محادثات الدعم");
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, []);
 
   useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const stats = await fetchSupportStats();
+        setSupportStats(stats || null);
+      } catch { setSupportStats(null); }
+    };
+    loadStats();
+  }, []);
+
+  useEffect(() => {
+    const loadConv = async () => {
+      if (!selectedConversationId) return;
+      const item = inboxItems.find((it) => it.conversation_id === selectedConversationId);
+      if (!item) return;
+      if (messagesByConv[selectedConversationId]?.length) return;
+      setLoading(true);
+      setError(null);
+      try {
+        let targetUserId: number | string | undefined = item.user?.id;
+        if ((item.user?.name || "").toLowerCase() === "admin" && item.last_message_by) {
+          try {
+            const summary = await fetchUsersSummary();
+            const match = summary.users.find((u) => {
+              const name = (u.name || "").toLowerCase();
+              const code = (u.user_code || "").toLowerCase();
+              const by = item.last_message_by?.toLowerCase() || "";
+              return name === by || code === by || name.includes(by) || code.includes(by);
+            });
+            if (match?.id) targetUserId = match.id;
+          } catch {}
+        }
+        const resp = await fetchSupportConversation(targetUserId ?? "");
+        const normalized: ChatMessage[] = (resp?.data ?? []).map((m) => ({
+          id: `${selectedConversationId}-${m.id}`,
+          sender: m.sender_id === resp.meta.user.id ? "user" : "admin",
+          content: m.message,
+          time: new Date(m.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+          status: m.read_at ? "delivered" : "sent",
+          srcId: m.id,
+        }));
+        setMessagesByConv((prev) => ({ ...prev, [selectedConversationId]: normalized }));
+        setCurrentUserId(targetUserId ?? null);
+        try {
+          await markSupportConversationRead(targetUserId ?? "");
+          setInboxItems((prev) => prev.map((it) => it.conversation_id === selectedConversationId ? { ...it, unread_count: 0 } : it));
+        } catch {}
+      } catch (e) {
+        setError((e as Error)?.message || "تعذر جلب محادثة الدعم");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadConv();
+  }, [selectedConversationId, inboxItems, messagesByConv]);
+
+  useEffect(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (!currentUserId || !selectedConversationId) return;
+    const tick = async () => {
+      try {
+        const resp = await fetchSupportConversation(currentUserId);
+        const metaUserId = resp.meta.user.id;
+        const incoming = new Map<number, { read_at: string | null; created_at: string; sender_id: number; message: string }>();
+        (resp.data || []).forEach((m) => incoming.set(m.id, { read_at: m.read_at, created_at: m.created_at, sender_id: m.sender_id, message: m.message }));
+        setMessagesByConv((prev): Record<string, ChatMessage[]> => {
+          const existing = prev[selectedConversationId] || [];
+          const updatedExisting = existing.map((m) => {
+            const src = m.srcId != null ? m.srcId : parseInt(m.id.split('-').pop() || '0');
+            const im = incoming.get(src);
+            if (im) {
+              const newTime = new Date(im.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
+              const newStatus = im.read_at ? "delivered" : "sent";
+              return { ...m, time: newTime, status: newStatus };
+            }
+            return m;
+          });
+          const existingIds = new Set(updatedExisting.map((m) => (m.srcId != null ? m.srcId : parseInt(m.id.split('-').pop() || '0'))));
+          const toAdd = (resp.data || []).filter((m) => !existingIds.has(m.id)).map((m) => ({
+            id: `${selectedConversationId}-${m.id}`,
+            sender: m.sender_id === metaUserId ? "user" : "admin",
+            content: m.message,
+            time: new Date(m.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+            status: m.read_at ? "delivered" : "sent",
+            srcId: m.id,
+          }));
+          const merged = toAdd.length ? [...updatedExisting, ...toAdd] : updatedExisting;
+          return { ...prev, [selectedConversationId]: merged as ChatMessage[] };
+        });
+        const last = (resp.data || [])[resp.data.length - 1];
+        if (last) {
+          const by = last.sender_id === resp.meta.user.id ? (resp.meta.user.name || "مستخدم") : "Admin";
+          const lastAt = last.created_at;
+          setInboxItems((prev) => prev.map((it) => (it.conversation_id === selectedConversationId ? { ...it, last_message: last.message, last_message_by: by, last_message_at: lastAt } : it)));
+        }
+      } catch {}
+    };
+    pollRef.current = window.setInterval(tick, 4000);
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [currentUserId, selectedConversationId]);
+
+  useEffect(() => {
     if (bubblesRef.current) {
       bubblesRef.current.scrollTop = bubblesRef.current.scrollHeight;
     }
-  }, [messagesByUser, selectedUserId]);
+  }, [messagesByConv, selectedConversationId]);
 
-  const filteredUsers = useMemo(() => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDesignMode(true);
+    };
+    const handleMouseDown = (e: MouseEvent) => {
+      const el = chatPaneRef.current;
+      if (!el) return;
+      if (!el.contains(e.target as Node)) setDesignMode(true);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, []);
+
+  const filteredInbox = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return users;
-    return users.filter(
-      (u) => u.name.toLowerCase().includes(term) || u.userCode.toLowerCase().includes(term) || u.phone.toLowerCase().includes(term)
-    );
-  }, [users, searchTerm]);
+    if (!term) return inboxItems;
+    return inboxItems.filter((it) => {
+      const name = (it.user?.name || "").toLowerCase();
+      const phone = (it.user?.phone || "").toLowerCase();
+      const email = (it.user?.email || "").toLowerCase();
+      const lastText = (it.last_message || "").toLowerCase();
+      return name.includes(term) || phone.includes(term) || email.includes(term) || lastText.includes(term);
+    });
+  }, [inboxItems, searchTerm]);
 
   const currentMessages = useMemo(() => {
-    if (!selectedUserId) return [];
-    return messagesByUser[selectedUserId] || [];
-  }, [messagesByUser, selectedUserId]);
+    if (!selectedConversationId) return [];
+    return messagesByConv[selectedConversationId] || [];
+  }, [messagesByConv, selectedConversationId]);
 
-  const selectedUser = useMemo(() => users.find((u) => u.id === selectedUserId) || null, [users, selectedUserId]);
+  const selectedConversationItem = useMemo(() => inboxItems.find((it) => it.conversation_id === selectedConversationId) || null, [inboxItems, selectedConversationId]);
 
   const lastUserMessageText = useMemo(() => {
-    const msgs = currentMessages;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].sender === "user") return msgs[i].content;
-    }
-    return "";
-  }, [currentMessages]);
+    const text = selectedConversationItem?.last_message || "";
+    return text;
+  }, [selectedConversationItem]);
 
   const smartSuggestions: QuickReply[] = useMemo(() => {
     const text = lastUserMessageText.toLowerCase();
@@ -104,58 +232,68 @@ export default function MessagesPage() {
     return suggestions;
   }, [lastUserMessageText]);
 
-  const lastMetaByUser = useMemo(() => {
-    const r: Record<string, { text: string; time: string }> = {};
-    users.forEach((u) => {
-      const msgs = messagesByUser[u.id] || [];
-      const last = msgs[msgs.length - 1];
-      r[u.id] = { text: last ? last.content : "", time: last ? last.time : "" };
-    });
-    return r;
-  }, [users, messagesByUser]);
-
-  const startFilteredUsers = useMemo(() => {
-    const term = startSearch.trim().toLowerCase();
-    if (!term) return users;
-    return users.filter(
-      (u) => u.name.toLowerCase().includes(term) || u.userCode.toLowerCase().includes(term) || u.phone.toLowerCase().includes(term)
-    );
-  }, [users, startSearch]);
-
-  const startConversationWithUser = (u: ChatUser) => {
-    if (!messagesByUser[u.id]) {
-      setMessagesByUser((prev) => ({ ...prev, [u.id]: [] }));
+  const formatTime = (ts?: string | null) => {
+    if (!ts) return "";
+    const t = ts.replace(" ", "T");
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
     }
-    setSelectedUserId(u.id);
-    setIsStartModalOpen(false);
+    return ts;
   };
 
-  const sendMessage = (content: string) => {
-    if (!selectedUserId) return;
+  const startFilteredInbox = useMemo(() => {
+    const term = startSearch.trim().toLowerCase();
+    if (!term) return inboxItems;
+    return inboxItems.filter((it) => {
+      const name = (it.user?.name || "").toLowerCase();
+      const phone = (it.user?.phone || "").toLowerCase();
+      const email = (it.user?.email || "").toLowerCase();
+      const lastText = (it.last_message || "").toLowerCase();
+      return name.includes(term) || phone.includes(term) || email.includes(term) || lastText.includes(term);
+    });
+  }, [inboxItems, startSearch]);
+
+  const startConversationWithUser = (item: SupportInboxItem) => {
+    const cid = item.conversation_id;
+    if (!messagesByConv[cid]) {
+      setMessagesByConv((prev) => ({ ...prev, [cid]: [] }));
+    }
+    setSelectedConversationId(cid);
+    setIsStartModalOpen(false);
+    setDesignMode(false);
+  };
+
+  const sendMessage = async (content: string) => {
+    if (!selectedConversationId) return;
     const text = content.trim();
     if (!text) return;
     const msg: ChatMessage = {
-      id: `${selectedUserId}-${Date.now()}`,
+      id: `${selectedConversationId}-${msgIdRef.current++}`,
       sender: "admin",
       content: text,
       time: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
       status: "sent",
     };
-    setMessagesByUser((prev) => ({ ...prev, [selectedUserId]: [...(prev[selectedUserId] || []), msg] }));
+    setMessagesByConv((prev) => ({ ...prev, [selectedConversationId]: [...(prev[selectedConversationId] || []), msg] }));
     setMessageInput("");
     setIsTyping(false);
-    setTimeout(() => {
-      setMessagesByUser((prev) => {
-        const list = [...(prev[selectedUserId] || [])];
+    try {
+      if (currentUserId == null) return;
+      const resp = await replySupport({ user_id: currentUserId, message: text });
+      const serverTime = new Date(resp.data.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
+      setMessagesByConv((prev) => {
+        const list = [...(prev[selectedConversationId] || [])];
         const idx = list.findIndex((m) => m.id === msg.id);
-        if (idx >= 0) list[idx] = { ...list[idx], status: "delivered" };
-        return { ...prev, [selectedUserId]: list };
+        if (idx >= 0) list[idx] = { ...list[idx], time: serverTime, srcId: resp.data.id };
+        return { ...prev, [selectedConversationId]: list };
       });
-    }, 800);
+      setInboxItems((prev) => prev.map((it) => it.conversation_id === selectedConversationId ? { ...it, last_message: text, last_message_by: resp.data.admin_name, last_message_at: resp.data.created_at } : it));
+    } catch {}
   };
 
-  const handleSend = () => sendMessage(messageInput);
-  const handleQuickSend = (qr: QuickReply) => sendMessage(qr.content);
+  const handleSend = () => { sendMessage(messageInput); };
+  const handleQuickSend = (qr: QuickReply) => { sendMessage(qr.content); };
   const appendEmoji = (emoji: string) => setMessageInput((prev) => prev + emoji);
   const handleAttachFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -175,6 +313,26 @@ export default function MessagesPage() {
               <p className="page-subtitle">محادثة بين المشرف والمستخدم مع ردود سريعة</p>
             </div>
           </div>
+          {supportStats && (
+            <div className="chat-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(140px, 1fr))', gap: 12 }}>
+              <div className="stat-card">
+                <span className="value-secondary">{supportStats.total_conversations}</span>
+                <span className="label">إجمالي المحادثات</span>
+              </div>
+              <div className="stat-card">
+                <span className="value-secondary">{supportStats.unread_conversations}</span>
+                <span className="label">غير مقروءة</span>
+              </div>
+              <div className="stat-card">
+                <span className="value-secondary">{supportStats.today_messages}</span>
+                <span className="label">رسائل اليوم</span>
+              </div>
+              {/* <div className="stat-card">
+                <span className="value-secondary">{supportStats.avg_response_time ?? '-'}</span>
+                <span className="label">متوسط زمن الرد</span>
+              </div> */}
+            </div>
+          )}
         </div>
       </div>
 
@@ -191,35 +349,45 @@ export default function MessagesPage() {
             <button className="start-chat-btn" onClick={() => setIsStartModalOpen(true)}>ابدأ محادثة</button>
           </div>
           <div className="messages-list">
-            {filteredUsers.map((u) => (
+            {filteredInbox.map((it) => (
               <button
-                key={u.id}
-                className={`messages-user-item ${selectedUserId === u.id ? "active" : ""}`}
-                onClick={() => setSelectedUserId(u.id)}
+                key={it.conversation_id}
+                className={`messages-user-item ${selectedConversationId === it.conversation_id ? "active" : ""}`}
+                onClick={() => { setSelectedConversationId(it.conversation_id); setDesignMode(false); }}
               >
-                <Image src={u.avatar || "/profile.png"} alt="" width={36} height={36} className="messages-avatar" />
+                <Image src={"/profile.png"} alt="" width={36} height={36} className="messages-avatar" />
                 <div className="messages-user-meta">
-                  <div className="messages-user-name">{u.name}</div>
-                  {/* <div className="messages-user-code">{u.userCode}</div> */}
+                  <div className="messages-user-name">{it.user?.name || "مستخدم"}</div>
                   <div className="messages-user-extra">
-                    <span className="last-text">{lastMetaByUser[u.id]?.text}</span>
-                    <span className="last-time">{lastMetaByUser[u.id]?.time}</span>
+                    <span className="last-text" dir="rtl" style={{ direction: 'rtl', textAlign: 'right' }}>{`${it.last_message_by ? `${it.last_message_by}: ` : ""}${it.last_message || ""}`}</span>
+                    <span className="last-time">{formatTime(it.last_message_at)}</span>
                   </div>
                 </div>
+                {(() => {
+                  const unreadVal = Number(it.unread_count) || 0;
+                  return unreadVal > 0 ? (
+                    <div
+                      className="unread-circle"
+                      style={{ marginInlineStart: 'auto', minWidth: 24, height: 24, borderRadius: 12, background: '#22c55e', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', paddingInline: 6 }}
+                    >
+                      {unreadVal}
+                    </div>
+                  ) : null;
+                })()}
               </button>
             ))}
           </div>
         </aside>
 
-        <section className="chat-pane">
-          {selectedUser ? (
+        <section className="chat-pane" ref={chatPaneRef} onClick={() => setDesignMode(false)}>
+          {selectedConversationItem ? (
             <>
-              <div className="chat-header">
+              <div className="chat-header" style={{ display: designMode ? "none" : undefined }}>
                 <div className="chat-user">
-                  <Image src={selectedUser.avatar || "/profile.png"} alt="" width={40} height={40} className="messages-avatar" />
+                  <Image src={"/profile.png"} alt="" width={40} height={40} className="messages-avatar" />
                   <div>
-                    <div className="chat-user-name">{selectedUser.name}</div>
-                    <div className="chat-user-code">{selectedUser.userCode}</div>
+                    <div className="chat-user-name">{selectedConversationItem.user?.name || "مستخدم"}</div>
+                    <div className="chat-user-code">{selectedConversationItem.user?.phone || selectedConversationItem.user?.email || ""}</div>
                   </div>
                 </div>
                 <div className="chat-actions">
@@ -229,11 +397,19 @@ export default function MessagesPage() {
                   <button className="quick-replies-toggle" onClick={() => window.location.href = '/users'}>
                     ملف المستخدم
                   </button>
+                  {selectedConversationItem && (
+                    <div
+                      className="messages-counter"
+                      style={{ marginInlineStart: 'auto', background: '#0ea5e9', color: '#fff', padding: '4px 10px', borderRadius: 9999, fontSize: '0.8rem' }}
+                    >
+                      الرسائل: {selectedConversationItem.messages_count}
+                    </div>
+                  )}
                 </div>
               </div>
 
               {showQuickReplies && (
-                <div className="quick-replies-menu">
+                <div className="quick-replies-menu" style={{ display: designMode ? "none" : undefined }}>
                   {quickReplies.map((qr) => (
                     <button key={qr.id} className="quick-reply-chip" onClick={() => handleQuickSend(qr)}>
                       {qr.title}
@@ -241,93 +417,111 @@ export default function MessagesPage() {
                   ))}
                 </div>
               )}
-
-              <div className="smart-suggestions">
-                {smartSuggestions.map((qr) => (
-                  <button key={qr.id} className="smart-chip" onClick={() => handleQuickSend(qr)}>
-                    {qr.title}
-                  </button>
-                ))}
+              <div className="chat-showcase" style={{ display: designMode ? "flex" : "none" }} onClick={() => setDesignMode(false)}>
+                <div className="showcase-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="showcase-brand">
+                    <Image src="/nas-masr.png" alt="" width={64} height={64} className="showcase-logo" />
+                    <span>ناس مصر</span>
+                  </div>
+                  {/* <h3 className="showcase-title">منطقة المحادثة</h3>
+                  <p className="showcase-subtitle">اضغط ESC أو داخل المحادثة للعودة</p>
+                  <div className="showcase-actions">
+                    <button className="btn-primary" onClick={() => setDesignMode(false)}>عودة للمحادثة</button>
+                    <button className="btn-secondary" onClick={() => setDesignMode(false)}>إغلاق العرض</button>
+                  </div> */}
+                </div>
               </div>
 
-              <div className="chat-bubbles" ref={bubblesRef}>
-                {currentMessages.map((m) => (
-                  <div key={m.id} className={`chat-bubble ${m.sender === "admin" ? "admin" : "user"}`}>
-                    <div className="bubble-content">{m.content}</div>
-                    <div className="bubble-time">
-                      {m.time}
-                      {m.sender === "admin" && (
-                        <span className={`bubble-status ${m.status}`}>{m.status === "delivered" ? "✓✓" : "✓"}</span>
-                      )}
+              <div style={{ display: designMode ? "none" : "block" }}>
+                <div className="smart-suggestions">
+                  {smartSuggestions.map((qr) => (
+                    <button key={qr.id} className="smart-chip" onClick={() => handleQuickSend(qr)}>
+                      {qr.title}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="chat-bubbles" ref={bubblesRef}>
+                  {currentMessages.map((m) => (
+                    <div key={m.id} className={`chat-bubble ${m.sender === "admin" ? "admin" : "user"}`}>
+                      <div className="bubble-content">{m.content}</div>
+                      <div className="bubble-time">
+                        {m.time}
+                        {m.sender === "admin" && (
+                          <span className={`bubble-status ${m.status}`}>{m.status === "delivered" ? "✓✓" : "✓"}</span>
+                        )}
+                      </div>
                     </div>
+                  ))}
+                  {isTyping && (
+                    <div className="typing-indicator">
+                      <span></span><span></span><span></span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="chat-input-bar">
+                  <div className="chat-input">
+                  <button
+                    className="input-action"
+                    onClick={() => {
+                      if (fileInputRef.current) fileInputRef.current.click();
+                      else setShowAttachmentsPanel((v) => !v);
+                    }}
+                    title="إرفاق"
+                  >
+                    📎
+                  </button>
+                  <button
+                    className="input-action"
+                    onClick={() => setShowEmojiPicker((v) => !v)}
+                    title="إيموجي"
+                  >
+                    😊
+                  </button>
+                  <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handleAttachFiles} />
+
+                  <input
+                    type="text"
+                    value={messageInput}
+                    onChange={(e) => {
+                      setMessageInput(e.target.value);
+                      setIsTyping(e.target.value.trim().length > 0);
+                    }}
+                    placeholder="اكتب رسالتك هنا"
+                    className="chat-input-field"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSend();
+                    }}
+                  />
+
+                  <button className="send-btn" onClick={handleSend} title="إرسال">
+                    <span className="send-icon">✈️</span>
+                  </button>
                   </div>
-                ))}
-                {isTyping && (
-                  <div className="typing-indicator">
-                    <span></span><span></span><span></span>
+                </div>
+
+                {showEmojiPicker && (
+                  <div className="emoji-menu">
+                    {["😀","😂","😍","👍","🙏","🔥","🎉","😎","😉","🙌"].map((e) => (
+                      <button key={e} className="emoji-chip" onClick={() => appendEmoji(e)}>{e}</button>
+                    ))}
+                  </div>
+                )}
+
+                {showAttachmentsPanel && (
+                  <div className="attachments-popover">
+                    <div className="attachments-title">إرفاق</div>
+                    <button className="attachment-option" onClick={() => fileInputRef.current?.click()}>ملفات</button>
+                    <button className="attachment-option">صورة</button>
                   </div>
                 )}
               </div>
-
-              <div className="chat-input">
-                <button
-                  className="input-action"
-                  onClick={() => {
-                    if (fileInputRef.current) fileInputRef.current.click();
-                    else setShowAttachmentsPanel((v) => !v);
-                  }}
-                  title="إرفاق"
-                >
-                  📎
-                </button>
-                <button
-                  className="input-action"
-                  onClick={() => setShowEmojiPicker((v) => !v)}
-                  title="إيموجي"
-                >
-                  😊
-                </button>
-                <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handleAttachFiles} />
-
-                <input
-                  type="text"
-                  value={messageInput}
-                  onChange={(e) => {
-                    setMessageInput(e.target.value);
-                    setIsTyping(e.target.value.trim().length > 0);
-                  }}
-                  placeholder="اكتب رسالتك هنا"
-                  className="chat-input-field"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSend();
-                  }}
-                />
-
-                <button className="send-btn" onClick={handleSend} title="إرسال">
-                  <span className="send-icon">✈️</span>
-                </button>
-              </div>
-
-              {showEmojiPicker && (
-                <div className="emoji-menu">
-                  {["😀","😂","😍","👍","🙏","🔥","🎉","😎","😉","🙌"].map((e) => (
-                    <button key={e} className="emoji-chip" onClick={() => appendEmoji(e)}>{e}</button>
-                  ))}
-                </div>
-              )}
-
-              {showAttachmentsPanel && (
-                <div className="attachments-popover">
-                  <div className="attachments-title">إرفاق</div>
-                  <button className="attachment-option" onClick={() => fileInputRef.current?.click()}>ملفات</button>
-                  <button className="attachment-option">صورة</button>
-                </div>
-              )}
             </>
           ) : (
             <div className="empty-state">
               <div className="empty-icon">📭</div>
-              <h3>اختر مستخدمًا لبدء المحادثة</h3>
+              <h3>اختر محادثة لبدء الدعم</h3>
             </div>
           )}
         </section>
@@ -350,13 +544,13 @@ export default function MessagesPage() {
                 />
               </div>
               <div className="start-list">
-                {startFilteredUsers.map((u) => (
-                  <button key={u.id} className="start-item" onClick={() => startConversationWithUser(u)}>
-                    <Image src={u.avatar || "/profile.png"} alt="" width={36} height={36} className="start-avatar" />
+                {startFilteredInbox.map((it) => (
+                  <button key={it.conversation_id} className="start-item" onClick={() => startConversationWithUser(it)}>
+                    <Image src={"/profile.png"} alt="" width={36} height={36} className="start-avatar" />
                     <div className="start-meta">
-                      <div className="start-name">{u.name}</div>
+                      <div className="start-name">{it.user?.name || "مستخدم"}</div>
                       <div className="start-sub">
-                        <span className="start-code">{u.userCode}</span>
+                        <span className="start-code">{it.user?.phone || it.user?.email || ''}</span>
                       </div>
                     </div>
                   </button>

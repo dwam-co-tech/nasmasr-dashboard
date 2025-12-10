@@ -254,7 +254,7 @@ export default function DashboardPage() {
 
       <div className="recent-activities-section">
         <h2 className="section-title">النشاطات الأخيرة</h2>
-        <ActivitySparkline series={sparkSeries} />
+        {/* <ActivitySparkline series={sparkSeries} /> */}
         <div className="activity-filters">
           {[
             { key: 'all', label: 'الكل' },

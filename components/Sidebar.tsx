@@ -17,11 +17,14 @@ const navItems: NavItem[] = [
     label: "إدارة الإعلانات", 
     icon: "/file.svg",
     subItems: [
-      { href: "/ads/rules", label: "إدارة الباقات", icon: "/globe.svg" }
+      { href: "/ads/create", label: "إنشاء إعلان", icon: "/file.svg" },
+      { href: "/ads/rules", label: "إدارة الباقات", icon: "/globe.svg" },
+      { href: "/moderation", label: "الموافقات والمراجعة", icon: "/star.png" },
+      { href: "/moderation/unpaid", label: "مراجعة الإعلانات غير المدفوعة", icon: "/star.png" },
     ]
   },
   { href: "/categories", label: "الأقسام والتصنيفات", icon: "/categories.png" },
-  { href: "/moderation", label: "الموافقات والمراجعة", icon: "/star.png" },
+  
   { href: "/users", label: " المستخدمون والمعلِنون والمناديب ", icon: "/profile.png" },
   { href: "/reports", label: "التقارير والإحصائيات", icon: "/clipboard.png" },
   { href: "/notifications", label: "الإشعارات ", icon: "/bell.png" },

@@ -2,17 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { fetchCategoryPlanPrices, updateCategoryPlanPrices } from "../../../services/categoryPlans";
+import { fetchSystemSettings, updateSystemSettings } from "../../../services/systemSettings";
 import { CategoryPlanPrice, CategoryPlanPriceUpdateItem } from "../../../models/category-plans";
 
 const initialRules = {
-  sideAdsPerUser: 3,
-  maxFreeAdValue: 1000,
-  maxFreeAdsCount: 500,
-  homepageAdvertisersCount: 10,
-  homepageAdsPerAdvertiser: 2,
-  autoApprovalThreshold: 500,
-  featuredPackagePrice: 0,
-  standardPackagePrice: 0,
+  free_ads_count: 0,
+  free_ads_max_price: 0,
 };
 
 export default function DisplayRules() {
@@ -24,6 +19,19 @@ export default function DisplayRules() {
   const [categoryRules, setCategoryRules] = useState<CategoryPlanPrice[]>([]);
 
   useEffect(() => {
+    fetchSystemSettings()
+      .then((res) => {
+        const count = (res?.data?.free_ads_count ?? (res as unknown as { free_ads_count?: number }).free_ads_count ?? 0);
+        const price = (res?.data?.free_ads_max_price ?? (res as unknown as { free_ads_max_price?: number }).free_ads_max_price ?? 0);
+        setRules({
+          free_ads_count: Number(count) || 0,
+          free_ads_max_price: Number(price) || 0,
+        });
+      })
+      .catch((err) => {
+        console.error("Failed to fetch system settings:", err);
+      });
+
     fetchCategoryPlanPrices()
       .then((data) => {
         setCategoryRules(data);
@@ -67,6 +75,21 @@ export default function DisplayRules() {
       .catch(console.error);
   };
 
+  const handleSaveSection = async () => {
+    try {
+      await updateSystemSettings({
+        free_ads_count: Number(rules.free_ads_count) || 0,
+        free_ads_max_price: Number(rules.free_ads_max_price) || 0,
+      });
+      setSavedMessage("تم حفظ قواعد الأقسام بنجاح ✅");
+      setTimeout(() => setSavedMessage(""), 3000);
+    } catch (error) {
+      console.error("Failed to update system settings:", error);
+      setSavedMessage("حدث خطأ أثناء حفظ قواعد الأقسام ❌");
+      setTimeout(() => setSavedMessage(""), 3000);
+    }
+  };
+
   return (
     <div className="rules-container">
       {/* New Enhanced Header */}
@@ -102,7 +125,12 @@ export default function DisplayRules() {
             </div>
             <div className="card-controls">
               <button
-                onClick={() => setIsEditingSection(prev => !prev)}
+                onClick={() => {
+                  if (isEditingSection) {
+                    handleSaveSection();
+                  }
+                  setIsEditingSection(prev => !prev);
+                }}
                 className="rules-action-btn btn-edit-rules"
               >
                 {isEditingSection ? 'إنهاء التعديل' : 'تعديل'}
@@ -120,8 +148,11 @@ export default function DisplayRules() {
                 <div className="input-wrapper">
                   <input
                     type="number"
-                    value={rules.featuredPackagePrice}
-                    onChange={(e) => setRules({...rules, featuredPackagePrice: parseInt(e.target.value) || 0})}
+                    value={rules.free_ads_count}
+                    onChange={(e) => setRules({
+                      ...rules,
+                      free_ads_count: parseInt(e.target.value) || 0,
+                    })}
                     disabled={!isEditingSection}
                     className={`form-input ${isEditingSection ? 'editable' : 'readonly'}`}
                   />
@@ -134,8 +165,11 @@ export default function DisplayRules() {
                 <div className="input-wrapper">
                   <input
                     type="number"
-                    value={rules.standardPackagePrice}
-                    onChange={(e) => setRules({...rules, standardPackagePrice: parseInt(e.target.value) || 0})}
+                    value={rules.free_ads_max_price}
+                    onChange={(e) => setRules({
+                      ...rules,
+                      free_ads_max_price: parseInt(e.target.value) || 0,
+                    })}
                     disabled={!isEditingSection}
                     className={`form-input ${isEditingSection ? 'editable' : 'readonly'}`}
                   />

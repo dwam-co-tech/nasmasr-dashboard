@@ -35,7 +35,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
   };
 
   return (
-    <html lang="ar">
+    <html lang="ar" suppressHydrationWarning>
       <head>
         <title>ناس مصر</title>
         <link rel="icon" href="/nas-masr.png" type="image/png" sizes="42x42" />
@@ -43,7 +43,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
         <link rel="apple-touch-icon" href="/nas-masr.png" sizes="180x180" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
         {isLanding ? (
           <main className="content">{children}</main>
         ) : (
