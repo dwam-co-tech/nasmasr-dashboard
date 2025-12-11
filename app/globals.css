@@ -8072,6 +8072,7 @@ html, body, .dashboard-layout, .content, .reports-page {
   z-index: 1000;
   padding: 20px;
   backdrop-filter: blur(4px);
+  overflow-y: auto;
 }
 
 .modal-content {
@@ -8080,8 +8081,10 @@ html, body, .dashboard-layout, .content, .reports-page {
   box-shadow: var(--shadow-lg);
   max-width: 900px;
   width: 100%;
-  max-height: 90vh;
-  overflow-y: auto;
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   position: relative;
   animation: modalSlideIn 0.3s ease-out;
 }
@@ -8253,7 +8256,7 @@ html, body, .dashboard-layout, .content, .reports-page {
 .btn-submit {
   background: linear-gradient(135deg, var(--color-primary), #16a085);
   color: white;
-  border: none;
+  border: 2px solid #16a085;
   padding: 12px 24px;
   border-radius: var(--border-radius);
   font-weight: 600;
@@ -14207,4 +14210,84 @@ body:has(.auth-layout) .dashboard-layout {
 .reports-row-inactive .reason-badge {
   text-decoration: line-through;
   opacity: 0.6;
+}
+/* User picker list */
+.user-picker-list {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.user-picker-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  text-align: right;
+  padding: 10px 12px;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #f3f4f6;
+  cursor: pointer;
+  transition: background-color .15s ease;
+  min-height: 52px;
+}
+
+.user-picker-item:hover {
+  background: #f8fafc;
+}
+
+.user-picker-item.selected {
+  background: #ecfdf5;
+}
+
+.user-picker-item .user-name {
+  font-weight: 700;
+  color: #111827;
+}
+
+.user-picker-item .user-phone {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.user-picker-item .user-code {
+  font-size: 12px;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.user-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+}
+
+.user-check { display: flex; align-items: center; justify-content: center; }
+
+.user-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.user-select-all input {
+  accent-color: var(--color-primary);
+}
+.modal-body {
+  overflow-y: auto;
+}
+
+.modal-content .form-actions {
+  position: sticky;
+  bottom: 0;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  padding: 12px 24px;
 }

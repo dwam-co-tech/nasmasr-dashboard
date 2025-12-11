@@ -48,9 +48,11 @@ export default function DisplayRules() {
         price_featured: Number(rule.price_featured) || 0,
         featured_ad_price: Number(rule.featured_ad_price) || 0,
         featured_days: Number(rule.featured_days) || 0,
+        featured_ads_count: Number(rule.featured_ads_count) || 0,
         price_standard: Number(rule.price_standard) || 0,
         standard_ad_price: Number(rule.standard_ad_price) || 0,
         standard_days: Number(rule.standard_days) || 0,
+        standard_ads_count: Number(rule.standard_ads_count) || 0,
       }));
 
       await updateCategoryPlanPrices({ items });
@@ -260,6 +262,22 @@ export default function DisplayRules() {
                               />
                             </div>
                             <div className="pricing-item">
+                              <div className="pricing-label">عدد الإعلانات</div>
+                              <input
+                                type="number"
+                                min={0}
+                                value={category.featured_ads_count}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value) || 0;
+                                  const updated = [...categoryRules];
+                                  updated[index] = { ...updated[index], featured_ads_count: v };
+                                  setCategoryRules(updated);
+                                }}
+                                disabled={!isEditing}
+                                className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
+                              />
+                            </div>
+                            <div className="pricing-item">
                               <div className="pricing-label">عدد الأيام</div>
                               <input
                                 type="number"
@@ -307,6 +325,22 @@ export default function DisplayRules() {
                                   const v = Number(e.target.value) || 0;
                                   const updated = [...categoryRules];
                                   updated[index] = { ...updated[index], standard_ad_price: v };
+                                  setCategoryRules(updated);
+                                }}
+                                disabled={!isEditing}
+                                className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
+                              />
+                            </div>
+                            <div className="pricing-item">
+                              <div className="pricing-label">عدد الإعلانات</div>
+                              <input
+                                type="number"
+                                min={0}
+                                value={category.standard_ads_count}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value) || 0;
+                                  const updated = [...categoryRules];
+                                  updated[index] = { ...updated[index], standard_ads_count: v };
                                   setCategoryRules(updated);
                                 }}
                                 disabled={!isEditing}

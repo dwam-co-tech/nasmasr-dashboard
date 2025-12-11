@@ -44,6 +44,18 @@ export default function CustomerChatsPage() {
   }, [currentPage]);
 
   useEffect(() => {
+    try {
+      const totalUnread = conversations.reduce((sum, c) => {
+        const v = typeof c.unread_count === 'number' ? c.unread_count : (unreadCache[c.conversation_id] ?? 0);
+        return sum + (Number(v) || 0);
+      }, 0);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('customerChatsCount', String(totalUnread));
+      }
+    } catch {}
+  }, [conversations, unreadCache]);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setDesignMode(true);
     };

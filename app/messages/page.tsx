@@ -60,6 +60,15 @@ export default function MessagesPage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const unreadTotal = inboxItems.reduce((sum, it) => sum + (Number(it.unread_count) || 0), 0);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('messagesCount', String(unreadTotal));
+      }
+    } catch {}
+  }, [inboxItems]);
+
+  useEffect(() => {
     const loadStats = async () => {
       try {
         const stats = await fetchSupportStats();
@@ -68,6 +77,15 @@ export default function MessagesPage() {
     };
     loadStats();
   }, []);
+
+  useEffect(() => {
+    try {
+      if (supportStats && typeof window !== 'undefined') {
+        const v = Number(supportStats.unread_conversations) || 0;
+        localStorage.setItem('messagesCount', String(v));
+      }
+    } catch {}
+  }, [supportStats]);
 
   useEffect(() => {
     const loadConv = async () => {

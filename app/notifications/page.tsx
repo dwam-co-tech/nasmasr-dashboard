@@ -1,6 +1,8 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { UserSummary } from '@/models/users';
+import { sendNotification as sendNotificationApi, fetchAllUsersSummary } from '@/services/notifications';
 
 interface AdRequest {
   id: string;
@@ -52,9 +54,7 @@ function DateInput(props: { value: string; onChange: (v: string) => void }) {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  useEffect(() => {
-    if (parsed && open) setViewDate(parsed);
-  }, [parsed, open]);
+  
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -95,7 +95,7 @@ function DateInput(props: { value: string; onChange: (v: string) => void }) {
       <button
         type="button"
         className="calendar-button"
-        onClick={() => setOpen((p) => !p)}
+        onClick={() => setOpen((p) => { const next = !p; if (next && parsed) setViewDate(parsed); return next; })}
         aria-label="فتح التقويم"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -170,217 +170,24 @@ export default function NotificationsPage() {
   const pageSize = 3;
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const [adRequests, setAdRequests] = useState<AdRequest[]>([
-    {
-      id: '1',
-      title: 'شقة للإيجار في المعادي',
-      advertiser: 'أحمد محمد',
-      category: 'عقارات',
-      status: 'pending',
-      submittedAt: '2024-01-15 10:30',
-      description: 'شقة 3 غرف وصالة في موقع متميز بالمعادي، الدور الثالث، مساحة 120 متر مربع، مفروشة بالكامل',
-      price: 15000,
-      location: 'المعادي، القاهرة',
-      phone: '01234567890',
-      email: 'ahmed.mohamed@email.com'
-    },
-    {
-      id: '2',
-      title: 'سيارة تويوتا كامري 2020',
-      advertiser: 'سارة أحمد',
-      category: 'سيارات',
-      status: 'pending',
-      submittedAt: '2024-01-15 14:20',
-      description: 'سيارة في حالة ممتازة، قطعت 50 ألف كيلو فقط، صيانة دورية منتظمة، لون أبيض',
-      price: 280000,
-      location: 'الجيزة',
-      phone: '01098765432',
-      email: 'sara.ahmed@email.com'
-    },
-    {
-      id: '3',
-      title: 'لابتوب ديل للبيع',
-      advertiser: 'محمد علي',
-      category: 'إلكترونيات',
-      status: 'approved',
-      submittedAt: '2024-01-14 16:45',
-      description: 'لابتوب ديل انسبايرون 15، معالج i7 الجيل العاشر، رام 16 جيجا، هارد SSD 512 جيجا',
-      price: 25000,
-      location: 'الإسكندرية',
-      phone: '01156789012',
-      email: 'mohamed.ali@email.com'
-    },
-    {
-      id: '4',
-      title: 'وظيفة مطور ويب',
-      advertiser: 'شركة التقنية المتقدمة',
-      category: 'وظائف',
-      status: 'rejected',
-      submittedAt: '2024-01-14 09:15',
-      description: 'مطلوب مطور ويب بخبرة 3 سنوات في React و Node.js، راتب مجزي ومزايا ممتازة',
-      price: 0,
-      location: 'القاهرة الجديدة',
-      phone: '01234567891',
-      email: 'hr@techcompany.com'
-    },
-    {
-      id: '5',
-      title: 'محل تجاري للإيجار',
-      advertiser: 'خالد حسن',
-      category: 'عقارات',
-      status: 'pending',
-      submittedAt: '2024-01-15 08:15',
-      description: 'محل تجاري في شارع رئيسي، مساحة 80 متر، مناسب لجميع الأنشطة التجارية',
-      price: 25000,
-      location: 'وسط البلد، القاهرة',
-      phone: '01087654321',
-      email: 'khaled.hassan@email.com'
-    },
-    {
-      id: '6',
-      title: 'دراجة نارية بحالة ممتازة',
-      advertiser: 'محمود حسين',
-      category: 'سيارات',
-      status: 'pending',
-      submittedAt: '2024-01-13 11:20',
-      description: 'دراجة نارية 250cc، استخدام خفيف، لا تحتاج أي مصاريف إضافية',
-      price: 32000,
-      location: 'طنطا',
-      phone: '01011223344',
-      email: 'mahmoud.hussein@email.com'
-    },
-    {
-      id: '7',
-      title: 'قطعة أرض سكنية للبيع',
-      advertiser: 'شركة المعمار',
-      category: 'عقارات',
-      status: 'pending',
-      submittedAt: '2024-01-12 10:00',
-      description: 'قطعة أرض 200 متر في منطقة سكنية هادئة، جميع المرافق متوفرة',
-      price: 450000,
-      location: 'المنصورة',
-      phone: '01220003344',
-      email: 'sales@elmamar.com'
-    },
-    {
-      id: '8',
-      title: 'هاتف آيفون 13 برو ماكس',
-      advertiser: 'عبدالله سمير',
-      category: 'إلكترونيات',
-      status: 'approved',
-      submittedAt: '2024-01-15 19:45',
-      description: 'الهاتف بحالة ممتازة، ذاكرة 256 جيجا، مع العلبة وجميع الملحقات',
-      price: 43000,
-      location: 'القاهرة',
-      phone: '01122334455',
-      email: 'abdallah.samir@email.com'
-    },
-    {
-      id: '9',
-      title: 'وظيفة محاسب',
-      advertiser: 'شركة الأمل',
-      category: 'وظائف',
-      status: 'pending',
-      submittedAt: '2024-01-16 09:05',
-      description: 'مطلوب محاسب خبرة سنتين، إجادة برامج المحاسبة والExcel، دوام كامل',
-      price: 0,
-      location: 'مدينة نصر',
-      phone: '01233445566',
-      email: 'hr@elamal.com'
-    },
-    {
-      id: '10',
-      title: 'فيلا للبيع بكمبوند راقي',
-      advertiser: 'معتز عبدالحميد',
-      category: 'عقارات',
-      status: 'pending',
-      submittedAt: '2024-01-16 10:30',
-      description: 'فيلا 350 متر، تشطيب فندقي، حديقة خاصة، قريبة من الخدمات',
-      price: 5500000,
-      location: '6 أكتوبر',
-      phone: '01099887766',
-      email: 'moataz.abdelhamid@email.com'
-    }
-  ]);
+  const [sendNotifOpen, setSendNotifOpen] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [users, setUsers] = useState<Array<{ id: number; name: string; phone?: string | null; user_code?: string | null }>>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifBody, setNotifBody] = useState('');
+  const [sending, setSending] = useState(false);
 
-  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([
-    {
-      id: '1',
-      title: 'رد تلقائي للاستفسارات العامة',
-      content: 'شكراً لتواصلك معنا. سيتم الرد عليك في أقرب وقت ممكن.',
-      category: 'عام'
-    },
-    {
-      id: '2',
-      title: 'رد للشكاوى',
-      content: 'نعتذر عن أي إزعاج. سيتم مراجعة شكواك والرد عليك خلال 24 ساعة.',
-      category: 'شكاوى'
-    },
-    {
-      id: '3',
-      title: 'رد لطلبات الدعم الفني',
-      content: 'تم استلام طلب الدعم الفني الخاص بك. سيتواصل معك فريق الدعم قريباً.',
-      category: 'دعم فني'
-    }
-  ]);
+  const [adRequests, setAdRequests] = useState<AdRequest[]>([]);
 
-  const [quickReplyForm, setQuickReplyForm] = useState({
-    title: '',
-    content: '',
-    category: ''
-  });
-
-  const handleQuickReplySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickReplyForm.title || !quickReplyForm.content || !quickReplyForm.category) {
-      alert('يرجى ملء جميع الحقول المطلوبة');
-      return;
-    }
-
-    if (editingQuickReply) {
-      setQuickReplies(prev => prev.map(r => r.id === editingQuickReply.id ? { ...editingQuickReply, ...quickReplyForm } : r));
-      setEditingQuickReply(null);
-      setShowQuickReplyModal(false);
-      setQuickReplyForm({ title: '', content: '', category: '' });
-      showToast('تم حفظ التعديلات بنجاح', 'success');
-    } else {
-      const newQuickReply: QuickReply = {
-        id: Date.now().toString(),
-        title: quickReplyForm.title,
-        content: quickReplyForm.content,
-        category: quickReplyForm.category
-      };
-      setQuickReplies([...quickReplies, newQuickReply]);
-      setQuickReplyForm({ title: '', content: '', category: '' });
-      setShowQuickReplyModal(false);
-      showToast('تم إضافة الرد السريع بنجاح', 'success');
-    }
-  };
 
   const handleViewAdDetails = (ad: AdRequest) => {
     setSelectedAdRequest(ad);
     setShowAdDetails(true);
   };
 
-  const handleDeleteQuickReply = (id: string) => {
-    setQuickReplies(prev => prev.filter(reply => reply.id !== id));
-    showToast('تم حذف الرد السريع', 'info');
-  };
-
-  const handleCopyQuickReply = async (reply: QuickReply) => {
-    try {
-      await navigator.clipboard.writeText(reply.content);
-      showToast('تم نسخ محتوى الرد', 'success');
-    } catch (err) {
-      showToast('تعذر نسخ المحتوى، حاول مرة أخرى', 'error');
-    }
-  };
-
-  const handleEditQuickReply = (reply: QuickReply) => {
-    setEditingQuickReply(reply);
-    setQuickReplyForm({ title: reply.title, content: reply.content, category: reply.category });
-    setShowQuickReplyModal(true);
-  };
 
   const formatPrice = (price: number) => {
     if (price === 0) return 'غير محدد';
@@ -427,6 +234,20 @@ export default function NotificationsPage() {
     return adRequests.filter(ad => isWithinRange(ad.submittedAt, dateFilter.start, dateFilter.end));
   }, [adRequests, dateFilter]);
 
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u => {
+      const s = `${u.name} ${u.phone || ''} ${u.user_code || ''}`.toLowerCase();
+      return s.includes(q);
+    });
+  }, [users, userSearch]);
+
+  const allSelected = useMemo(() => {
+    if (!filteredUsers.length) return false;
+    return filteredUsers.every(u => selectedUserIds.has(u.id));
+  }, [filteredUsers, selectedUserIds]);
+
   const totalPages = Math.max(1, Math.ceil(filteredAdRequests.length / pageSize));
   const paginatedAdRequests = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize;
@@ -435,16 +256,82 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(1);
-  }, [totalPages]);
+  }, [totalPages, currentPage]);
+
+  useEffect(() => {
+    if (!sendNotifOpen) return;
+    let cancelled = false;
+    const loadUsers = async () => {
+      setUsersLoading(true);
+      setUsersError(null);
+      try {
+        const arr: UserSummary[] = await fetchAllUsersSummary({ per_page: 100 });
+        const mapped = arr.map(u => ({ id: Number(u.id) || 0, name: u.name || '-', phone: u.phone ?? null, user_code: u.user_code || null }));
+        if (!cancelled) setUsers(mapped);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : 'تعذر جلب قائمة المستخدمين';
+        if (!cancelled) setUsersError(m);
+      } finally {
+        if (!cancelled) setUsersLoading(false);
+      }
+    };
+    loadUsers();
+    return () => { cancelled = true; };
+  }, [sendNotifOpen]);
+
+  const sendNotification = async () => {
+    if (!selectedUserIds.size) { showToast('يرجى اختيار مستخدم واحد على الأقل', 'error'); return; }
+    if (!notifBody.trim()) { showToast('يرجى كتابة نص الإشعار', 'error'); return; }
+    setSending(true);
+    try {
+      const body = notifTitle.trim() ? `${notifTitle.trim()}\n${notifBody.trim()}` : notifBody.trim();
+      const ids = Array.from(selectedUserIds);
+      let ok = 0, fail = 0;
+      await Promise.all(ids.map(async (uid) => {
+        try { await sendNotificationApi({ title: notifTitle.trim() || 'إشعار', body: body, user_id: uid, type: 'promotion' }); ok++; }
+        catch { fail++; }
+      }));
+      showToast(`تم إرسال الإشعار إلى ${ok} مستخدم${fail ? ` وفشل ${fail}` : ''}`, ok && !fail ? 'success' : fail && !ok ? 'error' : 'info');
+      setSelectedUserIds(new Set());
+      setNotifTitle('');
+      setNotifBody('');
+    } catch (e) {
+      const m = e instanceof Error ? e.message : 'تعذر إرسال الإشعار';
+      showToast(m, 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const toggleSelectUser = (id: number) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedUserIds(new Set());
+    } else {
+      setSelectedUserIds(new Set(filteredUsers.map(u => u.id)));
+    }
+  };
 
   return (
     <div className="notifications-page">
       {/* Header */}
       <div className="notifications-header">
-        <div className="header-content">
+        <div className="header-content" style={{ justifyContent: 'space-between' }}>
           <div>
             <h1 className="page-title">الإشعارات </h1>
             <p className="page-description">سجل إشعارات طلبات نشر الإعلانات</p>
+          </div>
+          <div className="header-actions">
+            <button className="btn-submit" onClick={() => setSendNotifOpen(true)}>
+              إرسال إشعار لمستخدم
+            </button>
           </div>
         </div>
       </div>
@@ -581,7 +468,7 @@ export default function NotificationsPage() {
               <h3>تفاصيل طلب الإعلان</h3>
               <button className="modal-close" onClick={() => setShowAdDetails(false)}>×</button>
             </div>
-            <div style={{ padding: '24px' }}>
+            <div className="modal-body" style={{ padding: 24 }}>
               <div style={{ marginBottom: '20px' }}>
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '1.2rem', fontWeight: '600' }}>{selectedAdRequest.title}</h4>
               </div>
@@ -629,7 +516,7 @@ export default function NotificationsPage() {
       )}
 
       {/* Quick Reply Modal */}
-      {showQuickReplyModal && (
+      {/* {showQuickReplyModal && (
         <div className="modal-overlay" onClick={() => { setShowQuickReplyModal(false); setEditingQuickReply(null); }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -682,6 +569,77 @@ export default function NotificationsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )} */}
+
+      {sendNotifOpen && (
+        <div className="modal-overlay" onClick={() => setSendNotifOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>إرسال إشعار لمستخدم</h3>
+              <button className="modal-close" onClick={() => setSendNotifOpen(false)}>×</button>
+            </div>
+            <div className="modal-body" style={{ padding: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
+                <div>
+                  <div style={{ marginBottom: 8, fontWeight: 700, color: '#111827' }}>اختر المستخدم</div>
+                  <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="ابحث بالاسم أو الهاتف أو الكود"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    style={{ marginBottom: 10 }}
+                  />
+                  <div className="user-select-all">
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
+                    <span>تحديد الكل</span>
+                    <span style={{ marginRight: 'auto', fontSize: 12, color: '#6b7280' }}>المحدد: {selectedUserIds.size}</span>
+                  </div>
+                  <div className="user-picker-list">
+                    {usersLoading && <div style={{ padding: 12, color: '#6b7280' }}>جاري التحميل...</div>}
+                    {usersError && <div style={{ padding: 12, color: '#ef4444' }}>{usersError}</div>}
+                    {!usersLoading && !usersError && filteredUsers.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => toggleSelectUser(u.id)}
+                        className={`user-picker-item ${selectedUserIds.has(u.id) ? 'selected' : ''}`}
+                      >
+                        <div className="user-check">
+                          <input type="checkbox" checked={selectedUserIds.has(u.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelectUser(u.id)} />
+                        </div>
+                        <div className="user-main">
+                          <div className="user-name">{u.name}</div>
+                          <div className="user-phone">{u.phone || '-'}</div>
+                        </div>
+                        <div className="user-code">{u.user_code || ''}</div>
+                      </button>
+                    ))}
+                    {!usersLoading && !usersError && !filteredUsers.length && (
+                      <div style={{ padding: 12, color: '#6b7280' }}>لا توجد نتائج</div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="form-group">
+                    <label>عنوان الإشعار</label>
+                    <input type="text" value={notifTitle} onChange={(e) => setNotifTitle(e.target.value)} placeholder="اختياري" />
+                  </div>
+                  <div className="form-group" style={{ marginTop: 12 }}>
+                    <label>نص الإشعار</label>
+                    <textarea rows={5} value={notifBody} onChange={(e) => setNotifBody(e.target.value)} placeholder="اكتب نص الإشعار" />
+                  </div>
+                </div>
+              </div>
+              <div className="form-actions" style={{ marginTop: 16 }}>
+                <button className="btn-cancel" type="button" onClick={() => setSendNotifOpen(false)}>إلغاء</button>
+                <button className="btn-submit" type="button" onClick={sendNotification} disabled={sending}>
+                  {sending ? 'جارٍ الإرسال...' : 'إرسال الإشعار'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

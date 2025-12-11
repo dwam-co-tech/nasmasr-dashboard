@@ -272,7 +272,7 @@ export default function SettingsPage() {
               placeholder="https://instagram.com/..."
             />
           </div>
-          <div className="form-group">
+          {/* <div className="form-group">
             <label htmlFor="whatsapp">واتساب</label>
             <input
               type="tel"
@@ -282,7 +282,7 @@ export default function SettingsPage() {
               onChange={(e) => handleInputChange('contactLinks', 'whatsapp', e.target.value)}
               placeholder="+20 1XX XXX XXXX"
             />
-          </div>
+          </div> */}
           <div className="form-group">
             <label htmlFor="email">البريد الإلكتروني</label>
             <input
@@ -294,7 +294,7 @@ export default function SettingsPage() {
               placeholder="contact@example.com"
             />
           </div>
-          <div className="form-group">
+          {/* <div className="form-group">
             <label htmlFor="phone">الهاتف</label>
             <input
               type="tel"
@@ -304,7 +304,7 @@ export default function SettingsPage() {
               onChange={(e) => handleInputChange('contactLinks', 'phone', e.target.value)}
               placeholder="+20 2 XXXX XXXX"
             />
-          </div>
+          </div> */}
         </div>
       </div>
 
@@ -353,7 +353,7 @@ export default function SettingsPage() {
     <div className="settings-section">
       <h3 className="section-title">إعدادات الواجهة</h3>
       
-      <div className="settings-group">
+      {/* <div className="settings-group">
         <h4 className="group-title">عرض أرقام الهواتف</h4>
         <div className="form-group">
           <label className="toggle-label">
@@ -377,7 +377,7 @@ export default function SettingsPage() {
             عند التعطيل، سيتم عرض كود المستخدم مع زر "ابدأ محادثة" بدلاً من رقم الهاتف
           </p>
         </div>
-      </div>
+      </div> */}
 
       <div className="settings-group">
         <h4 className="group-title">إعدادات الصفحة الرئيسية</h4>
