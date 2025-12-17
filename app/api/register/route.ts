@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
-    const { phone, password } = await req.json();
+    const { email, password } = await req.json();
     const baseUrl = process.env.LARAVEL_API_URL;
     if (!baseUrl) {
       return NextResponse.json({ message: 'Missing LARAVEL_API_URL' }, { status: 500 });
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ email, password }),
     });
 
     let data: unknown = null;

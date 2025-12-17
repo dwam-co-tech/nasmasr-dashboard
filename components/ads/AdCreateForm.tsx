@@ -5,7 +5,8 @@ import ManagedSelect from '@/components/ManagedSelect';
 import DateInput from '@/components/DateInput';
 import { ALL_CATEGORIES_OPTIONS, CATEGORY_LABELS_AR } from '@/constants/categories';
 import { fetchCategoryFields, fieldsToMap, fetchGovernorates, fetchCarMakes, fetchCategoryMainSubs } from '@/services/makes';
-import { createListingForm } from '@/services/listings';
+import { createListingWithPayload } from '@/services/create-listing';
+import type { CreateListingPayload } from '@/models/create-listing';
 import { useRouter } from 'next/navigation';
 
 type Toast = { id: string; message: string; type: 'success' | 'error' | 'info' | 'warning'; duration?: number };
@@ -17,6 +18,7 @@ const ATTRIBUTE_LABELS_AR: Record<string, string> = {
   category: 'رئيسي',
   sub: 'فرعي',
   driver: 'السائق',
+  driver_option: 'السائق',
   specialization: 'التخصص',
   job_category: 'فئة الوظيفة',
   salary: 'الراتب',
@@ -66,10 +68,11 @@ const translateAttributeKey = (key: string): string => {
 
 export default function AdCreateForm() {
   const router = useRouter();
-  const [category, setCategory] = useState<string>('');
+  const [category, setCategory] = useState<string>('real_estate');
   const [fieldsMap, setFieldsMap] = useState<Record<string, string[]>>({});
   const [attributes, setAttributes] = useState<AttributesState>({});
   const [mainSubsMap, setMainSubsMap] = useState<Record<string, string[]>>({});
+  const [carModelsByMake, setCarModelsByMake] = useState<Record<string, string[]>>({});
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [currency, setCurrency] = useState('EGP');
@@ -86,7 +89,21 @@ export default function AdCreateForm() {
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [newImageUrl, setNewImageUrl] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [locationLink, setLocationLink] = useState('');
+  const [locationLat, setLocationLat] = useState('');
+  const [locationLng, setLocationLng] = useState('');
+  const [locationAddress, setLocationAddress] = useState('');
+  const [isMapOpen, setIsMapOpen] = useState(false);
+  const [tempLat, setTempLat] = useState('');
+  const [tempLng, setTempLng] = useState('');
+  const [isLoadingMap, setIsLoadingMap] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const markerInstanceRef = useRef<any>(null);
+  const [mapSearchQuery, setMapSearchQuery] = useState('');
+  const [mapSearchResults, setMapSearchResults] = useState<{ label: string; lat: number; lng: number }[]>([]);
+  const [isSearchingMap, setIsSearchingMap] = useState(false);
 
   const showToast = (message: string, type: Toast['type'] = 'info', duration: number = 4000) => {
     const id = Date.now().toString();
@@ -123,6 +140,7 @@ export default function AdCreateForm() {
             const modelsOpts = Array.from(new Set(carMakes.makes.flatMap((m) => m.models)));
             if (!map['make'] && makesOpts.length) map['make'] = makesOpts;
             if (!map['model'] && modelsOpts.length) map['model'] = modelsOpts;
+            setCarModelsByMake(Object.fromEntries(carMakes.makes.map((m) => [m.name, m.models])));
           } catch {}
         }
         if (category === 'spare-parts') {
@@ -132,13 +150,14 @@ export default function AdCreateForm() {
             const modelsOpts = Array.from(new Set(carMakes.makes.flatMap((m) => m.models)));
             if (!map['brand'] && brandsOpts.length) map['brand'] = brandsOpts;
             if (!map['model'] && modelsOpts.length) map['model'] = modelsOpts;
+            setCarModelsByMake(Object.fromEntries(carMakes.makes.map((m) => [m.name, m.models])));
           } catch {}
         }
         try {
           const m = await fetchCategoryMainSubs(category);
           setMainSubsMap(m);
           const mains = Object.keys(m);
-          if (mains.length) {
+          if (mains.length && !['real_estate', 'cars', 'cars_rent'].includes(category)) {
             map['category'] = mains;
             const selectedMain = '';
             map['sub'] = selectedMain && m[selectedMain] ? m[selectedMain] : [];
@@ -158,7 +177,20 @@ export default function AdCreateForm() {
   
 
   const handleAttrChange = (key: string, value: string) => {
-    setAttributes((prev) => ({ ...prev, [key]: value }));
+    setAttributes((prev) => {
+      const next: AttributesState = { ...prev, [key]: value };
+      if (key === 'make' && category === 'cars') next['model'] = '';
+      if (key === 'brand' && category === 'spare-parts') next['model'] = '';
+      return next;
+    });
+  };
+
+  const getFieldLabel = (key: string): string => {
+    if (category === 'jobs') {
+      if (key === 'category') return 'التصنيف';
+      if (key === 'sub') return 'التخصص';
+    }
+    return translateAttributeKey(key);
   };
 
   const selectedGov = governorates.find((g) => g.name === governorate);
@@ -197,6 +229,10 @@ export default function AdCreateForm() {
       countryCode,
       governorate,
       city,
+      locationLink,
+      locationLat,
+      locationLng,
+      locationAddress,
       publishedAt,
       expireAt,
       attributes,
@@ -219,39 +255,227 @@ export default function AdCreateForm() {
     };
   }, [filePreviews]);
 
+  useEffect(() => {
+    const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('failed'));
+      document.head.appendChild(s);
+    });
+    const ensureLeaflet = async () => {
+      if (!(window as any).L) {
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(l);
+        await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+      }
+      return (window as any).L;
+    };
+    const initGoogle = async () => {
+      if (!(window as any).google || !(window as any).google.maps) {
+        const key = String((process as any).env?.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
+        if (!key) throw new Error('no_key');
+        await loadScript(`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}`);
+      }
+      return (window as any).google;
+    };
+    const initMap = async () => {
+      if (!isMapOpen || !mapContainerRef.current) return;
+      setIsLoadingMap(true);
+      const defLat = Number(String(locationLat || '').trim() || '26.8206');
+      const defLng = Number(String(locationLng || '').trim() || '30.8025');
+      try {
+        const google = await initGoogle();
+        const center = { lat: defLat, lng: defLng };
+        const map = new google.maps.Map(mapContainerRef.current, { center, zoom: 6 });
+        const marker = new google.maps.Marker({ position: center, map, draggable: true });
+        map.addListener('click', (e: any) => {
+          marker.setPosition(e.latLng);
+          setTempLat(String(e.latLng.lat()));
+          setTempLng(String(e.latLng.lng()));
+        });
+        marker.addListener('dragend', (e: any) => {
+          setTempLat(String(e.latLng.lat()));
+          setTempLng(String(e.latLng.lng()));
+        });
+        mapInstanceRef.current = map;
+        markerInstanceRef.current = marker;
+      } catch {
+        const L = await ensureLeaflet();
+        const center = [defLat, defLng];
+        const map = L.map(mapContainerRef.current).setView(center, 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+        const marker = L.marker(center, { draggable: true }).addTo(map);
+        map.on('click', (e: any) => {
+          marker.setLatLng(e.latlng);
+          setTempLat(String(e.latlng.lat));
+          setTempLng(String(e.latlng.lng));
+        });
+        marker.on('dragend', () => {
+          const ll = marker.getLatLng();
+          setTempLat(String(ll.lat));
+          setTempLng(String(ll.lng));
+        });
+        mapInstanceRef.current = map;
+        markerInstanceRef.current = marker;
+      } finally {
+        setIsLoadingMap(false);
+      }
+    };
+    initMap();
+    return () => {
+      mapInstanceRef.current = null;
+      markerInstanceRef.current = null;
+    };
+  }, [isMapOpen, locationLat, locationLng]);
+
+  useEffect(() => {
+    const run = async () => {
+      const q = String(mapSearchQuery || '').trim();
+      if (!isMapOpen || q.length < 3) { setMapSearchResults([]); return; }
+      setIsSearchingMap(true);
+      try {
+        const google = (window as any).google;
+        if (google && google.maps) {
+          const geocoder = new google.maps.Geocoder();
+          geocoder.geocode({ address: q, region: 'EG' }, (results: any, status: any) => {
+            if (status === 'OK' && Array.isArray(results)) {
+              const items = results.slice(0, 6).map((r: any) => ({
+                label: String(r.formatted_address || ''),
+                lat: Number(r.geometry.location.lat()),
+                lng: Number(r.geometry.location.lng()),
+              }));
+              setMapSearchResults(items);
+            } else {
+              setMapSearchResults([]);
+            }
+            setIsSearchingMap(false);
+          });
+        } else {
+          const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&accept-language=ar&limit=6&countrycodes=eg`);
+          const data = await resp.json().catch(() => []);
+          const items = Array.isArray(data) ? data.map((d: any) => ({
+            label: String(d.display_name || ''),
+            lat: Number(d.lat),
+            lng: Number(d.lon),
+          })) : [];
+          setMapSearchResults(items.slice(0, 6));
+          setIsSearchingMap(false);
+        }
+      } catch {
+        setMapSearchResults([]);
+        setIsSearchingMap(false);
+      }
+    };
+    const t = setTimeout(run, 450);
+    return () => { try { clearTimeout(t); } catch {} };
+  }, [mapSearchQuery, isMapOpen]);
+
+  const selectSearchResult = (lat: number, lng: number, label: string) => {
+    setTempLat(String(lat));
+    setTempLng(String(lng));
+    setMapSearchResults([]);
+    try {
+      const google = (window as any).google;
+      if (google && google.maps && mapInstanceRef.current) {
+        const center = { lat, lng };
+        mapInstanceRef.current.panTo(center);
+        try {
+          const currentZoom = typeof mapInstanceRef.current.getZoom === 'function' ? mapInstanceRef.current.getZoom() : 6;
+          if (!currentZoom || currentZoom < 15) mapInstanceRef.current.setZoom(15);
+        } catch {}
+        if (markerInstanceRef.current) markerInstanceRef.current.setPosition(center);
+      } else if (mapInstanceRef.current && markerInstanceRef.current) {
+        markerInstanceRef.current.setLatLng([lat, lng]);
+        try {
+          const currentZoom = typeof mapInstanceRef.current.getZoom === 'function' ? mapInstanceRef.current.getZoom() : 6;
+          mapInstanceRef.current.setView([lat, lng], currentZoom < 15 ? 15 : currentZoom);
+        } catch {
+          mapInstanceRef.current.setView([lat, lng], 15);
+        }
+      }
+    } catch {}
+  };
+
+  const reverseGeocode = async (lat: string, lng: string) => {
+    try {
+      const google = (window as any).google;
+      if (google && google.maps) {
+        const geocoder = new google.maps.Geocoder();
+        return new Promise<string>((resolve) => {
+          geocoder.geocode({ location: { lat: Number(lat), lng: Number(lng) } }, (results: any, status: any) => {
+            if (status === 'OK' && Array.isArray(results) && results[0]?.formatted_address) resolve(String(results[0].formatted_address));
+            else resolve('');
+          });
+        });
+      }
+    } catch {}
+    try {
+      const resp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&accept-language=ar`);
+      const data = await resp.json().catch(() => null);
+      const addr = data && typeof data === 'object' ? (data.display_name || '') : '';
+      return String(addr || '').trim();
+    } catch {
+      return '';
+    }
+  };
+
   const submit = async () => {
     if (!category) { showToast('اختر القسم أولاً', 'warning'); return; }
     try {
-      const fd = new FormData();
-      if (description) fd.append('description', description);
-      if (price) fd.append('price', price);
-      if (currency) fd.append('currency', currency);
-      if (planType) fd.append('plan_type', planType);
-      if (contactPhone) fd.append('contact_phone', contactPhone);
-      if (whatsappPhone) fd.append('whatsapp_phone', whatsappPhone);
-      if (countryCode) fd.append('country_code', countryCode);
-      if (governorate) fd.append('governorate', governorate);
-      if (city) fd.append('city', city);
-      if (publishedAt) fd.append('published_at', publishedAt);
-      if (expireAt) fd.append('expire_at', expireAt);
-      fd.append('category', category);
-      if (attributes && Object.keys(attributes).length) {
-        for (const [k, v] of Object.entries(attributes)) {
-          const val = String(v ?? '').trim();
-          if (!val) continue;
-          fd.append(`attributes[${k}]`, val);
-        }
+      const payload: CreateListingPayload = {
+        category,
+        description,
+        price,
+        currency,
+        plan_type: planType,
+        contact_phone: contactPhone,
+        whatsapp_phone: whatsappPhone,
+        country_code: countryCode,
+        governorate,
+        city,
+        address: locationAddress || attributes['address'],
+        lat: locationLat,
+        lng: locationLng,
+        map_link: locationLink,
+        published_at: publishedAt,
+        expire_at: expireAt,
+        attributes,
+        main_image_file: imageFiles[0],
+        image_files: imageFiles.length > 1 ? imageFiles : undefined,
+        main_image_url: imageFiles.length === 0 && images.length > 0 ? images[0] : undefined,
+        images_urls: imageFiles.length === 0 && images.length > 1 ? images.slice(1) : undefined,
+      };
+      if (category === 'cars') {
+        const year = Number(String(attributes['year'] || '').trim());
+        const odometer = Number(String(attributes['kilometers'] || '').trim());
+        Object.assign(payload, {
+          make: attributes['make'] || undefined,
+          model: attributes['model'] || undefined,
+          year: Number.isFinite(year) ? year : undefined,
+          transmission: attributes['transmission'] || undefined,
+          fuel_type: attributes['fuel_type'] || undefined,
+          odometer: Number.isFinite(odometer) ? odometer : undefined,
+          condition: attributes['condition'] || undefined,
+        });
       }
-      if (attributes['make']) fd.append('make', attributes['make']);
-      if (attributes['model']) fd.append('model', attributes['model']);
-      if (imageFiles.length > 0) {
-        fd.append('main_image', imageFiles[0]);
-        for (const img of imageFiles.slice(1)) fd.append('images[]', img);
-      } else if (images.length > 0) {
-        fd.append('main_image_url', images[0]);
-        for (const img of images.slice(1)) fd.append('images_urls[]', img);
+      if (category === 'real_estate') {
+        const area = Number(String(attributes['area'] || '').trim());
+        const rooms = Number(String(attributes['rooms'] || '').trim());
+        const bathrooms = Number(String(attributes['bathrooms'] || '').trim());
+        const floor_level = Number(String(attributes['floor'] || '').trim());
+        Object.assign(payload, {
+          area: Number.isFinite(area) ? area : undefined,
+          rooms: Number.isFinite(rooms) ? rooms : undefined,
+          bathrooms: Number.isFinite(bathrooms) ? bathrooms : undefined,
+          floor_level: Number.isFinite(floor_level) ? floor_level : undefined,
+          finishing_type: attributes['finishing_type'] || undefined,
+        });
       }
-      const resp = await createListingForm(category, fd);
+      const resp = await createListingWithPayload(category, payload);
       showToast('تم إنشاء الإعلان بنجاح', 'success');
       try {
         const obj = resp as Record<string, unknown>;
@@ -276,7 +500,8 @@ export default function AdCreateForm() {
             options={ALL_CATEGORIES_OPTIONS}
             value={category}
             onChange={setCategory}
-            placeholder="اختر القسم"
+            searchable
+            searchPlaceholder="ابحث في الأقسام"
             className="category-select-wide"
           />
         </div>
@@ -309,7 +534,7 @@ export default function AdCreateForm() {
 
       <div className="settings-section" style={{ marginTop: 16 }}>
         <h3 className="section-title">تفاصيل عامة</h3>
-        <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+        <div className="form-grid">
           <div className="form-group">
             <label>السعر</label>
             <input className="form-input" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" />
@@ -363,13 +588,134 @@ export default function AdCreateForm() {
               placeholder="اختر المدينة"
             />
           </div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="location-label">الموقع على الخريطة</label>
+            <div className="location-selector">
+              <button type="button" className="map-button" onClick={() => { setIsMapOpen(true); setTempLat(locationLat || ''); setTempLng(locationLng || ''); }}>فتح الخريطة</button>
+              {/* <input className="form-input" value={locationLink} onChange={(e) => setLocationLink(e.target.value)} placeholder="ألصق رابط موقع جوجل هنا" style={{ maxWidth: 420 }} /> */}
+              {/* <button
+                type="button"
+                className="map-button"
+                onClick={async () => {
+                  const url = String(locationLink || '').trim();
+                  if (!url) { showToast('ألصق رابط من خرائط جوجل أولاً', 'warning'); return; }
+                  const atMatch = url.match(/@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)/);
+                  const qMatch = url.match(/[?&](?:q|ll)=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)/);
+                  const found = atMatch || qMatch;
+                  if (!found) { showToast('تعذر استخراج الإحداثيات من الرابط', 'error'); return; }
+                  const lat = found[1];
+                  const lng = found[2];
+                  setLocationLat(lat);
+                  setLocationLng(lng);
+                  try {
+                    const resp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&accept-language=ar`);
+                    const data = await resp.json().catch(() => null);
+                    const addr = data && typeof data === 'object' ? (data.display_name || '') : '';
+                    const out = String(addr || '').trim();
+                    if (out) {
+                      setLocationAddress(out);
+                      setAttributes((prev) => ({ ...prev, address: out }));
+                      showToast('تم تحديد العنوان تلقائياً', 'success');
+                    } else {
+                      showToast('تم حفظ الإحداثيات بدون عنوان مفصل', 'info');
+                    }
+                  } catch {
+                    showToast('تعذر جلب العنوان من الإحداثيات', 'error');
+                  }
+                }}
+              >
+                استخراج
+              </button> */}
+              <button type="button" className="btn-delete" onClick={() => { setLocationLink(''); setLocationLat(''); setLocationLng(''); setLocationAddress(''); }}>إعادة تعيين</button>
+            </div>
+            <div className="inline-actions" style={{ gap: 12, marginTop: 8 }}>
+              <input className="form-input" value={locationAddress} onChange={(e) => setLocationAddress(e.target.value)} placeholder="العنوان الكامل (يمكن تعديله)" />
+            </div>
+            <div className="hidden-location-data">
+              <input value={locationLat} readOnly />
+              <input value={locationLng} readOnly />
+              <input value={locationLink} readOnly />
+            </div>
+          </div>
         </div>
       </div>
+
+      {isMapOpen && (
+        <div className="modal-overlay">
+          <div className="map-modal">
+            <div className="map-search">
+              <div className="search-container">
+                <input
+                  className="search-input"
+                  value={mapSearchQuery}
+                  onChange={(e) => { setMapSearchQuery(e.target.value); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const first = mapSearchResults[0];
+                      if (first) {
+                        selectSearchResult(first.lat, first.lng, first.label);
+                      }
+                    }
+                  }}
+                  placeholder="ابحث عن عنوان أو منطقة"
+                />
+                <span className="search-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+                </span>
+                {(isSearchingMap || mapSearchResults.length > 0) && (
+                  <div className="map-search-results">
+                    {isSearchingMap && mapSearchResults.length === 0 ? (
+                      <div className="map-search-item">
+                        <span className="map-search-item-title">جاري البحث...</span>
+                      </div>
+                    ) : (
+                      mapSearchResults.map((r, i) => (
+                        <button key={i} className="map-search-item" onClick={() => selectSearchResult(r.lat, r.lng, r.label)}>
+                          <span className="map-search-item-title">{r.label}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="map-canvas" ref={mapContainerRef} />
+            <div className="inline-actions" style={{ gap: 12, marginTop: 8 }}>
+              <input className="form-input" value={tempLat ? `${tempLat}, ${tempLng}` : `${locationLat || ''}, ${locationLng || ''}`} readOnly placeholder="الإحداثيات" />
+            </div>
+            <div className="map-actions">
+              <button className="btn-delete" onClick={() => { setIsMapOpen(false); }}>إلغاء</button>
+              <button
+                className="map-button"
+                disabled={isLoadingMap}
+                onClick={async () => {
+                  const lat = String(tempLat || locationLat || '').trim();
+                  const lng = String(tempLng || locationLng || '').trim();
+                  if (!lat || !lng) { showToast('اختر موقعاً على الخريطة أولاً', 'warning'); return; }
+                  setLocationLat(lat);
+                  setLocationLng(lng);
+                  const addr = await reverseGeocode(lat, lng);
+                  if (addr) {
+                    setLocationAddress(addr);
+                    setAttributes((prev) => ({ ...prev, address: addr }));
+                  }
+                  setLocationLink(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lat)},${encodeURIComponent(lng)}`);
+                  setIsMapOpen(false);
+                  showToast('تم تحديد الموقع وكتابة العنوان', 'success');
+                }}
+              >
+                تم
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {category && (
         <div className="category-fields">
           <h4>تفاصيل القسم: {categoryLabel}</h4>
-          <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="form-grid">
             {Object.keys(fieldsMap).length === 0 && (
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                 <p className="form-help">لا توجد حقول محددة لهذا القسم حالياً</p>
@@ -377,21 +723,29 @@ export default function AdCreateForm() {
             )}
             {Object.entries(fieldsMap).map(([key, options]) => (
               <div key={key} className="form-group">
-                <label>{translateAttributeKey(key)}</label>
+                <label>{getFieldLabel(key)}</label>
                 {(() => {
-                  const mappedOptions = key === 'sub' && Object.keys(mainSubsMap).length
-                    ? ((attributes['category'] && mainSubsMap[attributes['category']]) ? mainSubsMap[attributes['category']] : [])
-                    : options;
+                  let mappedOptions = options;
+                  if (key === 'sub' && Object.keys(mainSubsMap).length) {
+                    mappedOptions = (attributes['category'] && mainSubsMap[attributes['category']]) ? mainSubsMap[attributes['category']] : [];
+                  }
+                  if (key === 'model') {
+                    if (category === 'cars' && attributes['make']) {
+                      mappedOptions = carModelsByMake[attributes['make']] ?? [];
+                    } else if (category === 'spare-parts' && attributes['brand']) {
+                      mappedOptions = carModelsByMake[attributes['brand']] ?? [];
+                    }
+                  }
                   return mappedOptions && mappedOptions.length > 0 ? (
                   <ManagedSelect
                     options={mappedOptions.map((o) => ({ value: o, label: o }))}
                     value={attributes[key] || ''}
                     onChange={(v) => handleAttrChange(key, v)}
-                    placeholder={`اختر ${translateAttributeKey(key)}`}
+                    placeholder={`اختر ${getFieldLabel(key)}`}
                     className="edit-select-wide"
                   />
                   ) : (
-                  <input className="form-input" value={attributes[key] || ''} onChange={(e) => handleAttrChange(key, e.target.value)} placeholder={`أدخل ${translateAttributeKey(key)}`} />
+                  <input className="form-input" value={attributes[key] || ''} onChange={(e) => handleAttrChange(key, e.target.value)} placeholder={`أدخل ${getFieldLabel(key)}`} />
                   );
                 })()}
               </div>

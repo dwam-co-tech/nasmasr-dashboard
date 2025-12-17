@@ -1,5 +1,25 @@
-import type { NotificationPayload, NotificationResponse } from '@/models/notifications';
+import type { AdminNotificationReadResponse, AdminNotificationsCountResponse, AdminNotificationsResponse, NotificationPayload, NotificationResponse } from '@/models/notifications';
 import type { UsersSummaryResponse, UserSummary } from '@/models/users';
+
+async function readJsonOrText(res: Response): Promise<{ json: unknown | null; text: string | null }> {
+  try {
+    const json = await res.json();
+    return { json, text: null };
+  } catch {
+    try {
+      const text = await res.text();
+      return { json: null, text };
+    } catch {
+      return { json: null, text: null };
+    }
+  }
+}
+
+function pickErrorMessage(raw: unknown, fallback: string): string {
+  if (!raw || typeof raw !== 'object') return fallback;
+  const err = raw as { error?: string; message?: string };
+  return err.error || err.message || fallback;
+}
 
 export async function sendNotification(payload: NotificationPayload, token?: string): Promise<NotificationResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
@@ -67,4 +87,50 @@ export async function fetchAllUsersSummary(
     for (const arr of results) all.push(...arr);
   }
   return all;
+}
+
+export async function fetchAdminNotifications(page = 1, token?: string): Promise<AdminNotificationsResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+
+  const url = new URL('https://api.nasmasr.app/api/admin/admin-notifications');
+  url.searchParams.set('page', String(Math.max(1, page || 1)));
+
+  const res = await fetch(url.toString(), { method: 'GET', headers });
+  const { json, text } = await readJsonOrText(res);
+  if (!res.ok || !json) {
+    const message = pickErrorMessage(json, text || 'تعذر جلب الإشعارات');
+    throw new Error(message);
+  }
+  return json as AdminNotificationsResponse;
+}
+
+export async function fetchAdminNotificationsCount(token?: string): Promise<number> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch('https://api.nasmasr.app/api/admin/admin-notifications/count', { method: 'GET', headers });
+  const { json, text } = await readJsonOrText(res);
+  if (!res.ok || !json || typeof json !== 'object') {
+    const message = pickErrorMessage(json, text || 'تعذر جلب عدد الإشعارات غير المقروءة');
+    throw new Error(message);
+  }
+  const obj = json as AdminNotificationsCountResponse;
+  return Number(obj.count || 0);
+}
+
+export async function markAdminNotificationRead(id: number, token?: string): Promise<AdminNotificationReadResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const safeId = Number(id);
+  const res = await fetch(`https://api.nasmasr.app/api/admin/admin-notifications/${safeId}/read`, { method: 'PATCH', headers });
+  const { json, text } = await readJsonOrText(res);
+  if (!res.ok || !json || typeof json !== 'object') {
+    const message = pickErrorMessage(json, text || 'تعذر تعليم الإشعار كمقروء');
+    throw new Error(message);
+  }
+  const obj = json as AdminNotificationReadResponse;
+  return { message: String(obj.message || 'Notification marked as read') };
 }

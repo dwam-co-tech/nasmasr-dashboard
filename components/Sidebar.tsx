@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { fetchAdminStats, fetchRecentActivities } from "@/services/adminStats";
 import { fetchUsersSummary } from "@/services/users";
+import { fetchAdminNotificationsCount } from "@/services/notifications";
 
 type NavSubItem = { href: string; label: string; icon: string };
 type NavItem = { href: string; label: string; icon: string; subItems?: NavSubItem[] };
@@ -57,22 +58,22 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     const token = typeof window !== "undefined" ? (localStorage.getItem("authToken") ?? undefined) : undefined;
     const load = async () => {
       try {
-        const [stats, activities, users] = await Promise.all([
+        const [stats, activities, users, unreadNotifications] = await Promise.all([
           fetchAdminStats(token).catch(() => null),
           fetchRecentActivities(20, token).catch(() => null),
           fetchUsersSummary(token).catch(() => null),
+          fetchAdminNotificationsCount(token).catch(() => 0),
         ]);
         const advCount = Array.isArray(users?.users) ? users!.users.filter(u => u.role === "advertiser").length : 0;
         const userCount = Array.isArray(users?.users) ? users!.users.filter(u => u.role === "user").length : 0;
         const msgCount = Array.isArray(users?.users) ? users!.users.length * 2 : 0;
         const chatsCount = Math.max(advCount, userCount);
         const adsTotal = typeof stats?.cards?.total?.count === "number" ? stats!.cards.total.count : 0;
-        const pendingAds = typeof stats?.cards?.pending?.count === "number" ? stats!.cards.pending.count : 0;
         const recentCount = typeof activities?.count === "number" ? activities!.count : Array.isArray(activities?.activities) ? activities!.activities.length : 0;
         const next: Record<string, number> = {
           "/dashboard": recentCount,
           "/ads": adsTotal,
-          "/notifications": pendingAds,
+          "/notifications": Number(unreadNotifications) || 0,
           "/messages": msgCount,
           "/customer-chats": chatsCount,
         };
@@ -81,26 +82,13 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       } catch {}
     };
     load();
-    const poll = setInterval(() => {
+    const pollNotifications = setInterval(async () => {
       try {
-        const keys: Record<string, number | undefined> = {
-          "/dashboard": Number(localStorage.getItem("recentActivitiesCount")) || undefined,
-          "/ads": Number(localStorage.getItem("adsTotalCount")) || undefined,
-          "/notifications": Number(localStorage.getItem("notificationsCount")) || undefined,
-          "/messages": Number(localStorage.getItem("messagesCount")) || undefined,
-          "/customer-chats": Number(localStorage.getItem("customerChatsCount")) || undefined,
-        };
-        setCounts(prev => {
-          const updated = { ...prev };
-          Object.keys(keys).forEach(k => {
-            const v = keys[k];
-            if (typeof v === "number" && !Number.isNaN(v)) updated[k] = v;
-          });
-          return updated;
-        });
+        const c = await fetchAdminNotificationsCount(token).catch(() => 0);
+        setCounts(prev => ({ ...prev, "/notifications": Number(c) || 0 }));
       } catch {}
-    }, 5000);
-    return () => { mounted = false; clearInterval(poll); };
+    }, 60000);
+    return () => { mounted = false; clearInterval(pollNotifications); };
   }, []);
 
   return (

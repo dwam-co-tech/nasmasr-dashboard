@@ -6,12 +6,12 @@ import Image from 'next/image';
 import { login as loginService, AuthResponse, AuthError } from '@/services/auth';
 
 export default function LoginPage() {
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [generalErrors, setGeneralErrors] = useState<string[]>([]);
-  const [phoneErrors, setPhoneErrors] = useState<string[]>([]);
+  const [emailErrors, setEmailErrors] = useState<string[]>([]);
   const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
   const [rememberMe, setRememberMe] = useState(false);
   const router = useRouter();
@@ -21,22 +21,22 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setGeneralErrors([]);
-    setPhoneErrors([]);
+    setEmailErrors([]);
     setPasswordErrors([]);
     setIsLoading(true);
 
-    const validationErrors: { phone?: string; password?: string } = {};
-    if (!phone) validationErrors.phone = 'يرجى إدخال رقم الهاتف';
+    const validationErrors: { email?: string; password?: string } = {};
+    if (!email) validationErrors.email = 'يرجى إدخال البريد الإلكتروني';
     if (!password) validationErrors.password = 'يرجى إدخال كلمة المرور';
-    const phoneDigits = phone.replace(/\D/g, '');
-    if (phone && (phoneDigits.length !== 11 || !phoneDigits.startsWith('01'))) {
-      validationErrors.phone = 'رقم الهاتف غير صحيح (صيغة مصرية: 01XXXXXXXXX)';
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email && !emailPattern.test(email)) {
+      validationErrors.email = 'البريد الإلكتروني غير صحيح';
     }
     if (password && password.length < 6) {
       validationErrors.password = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
     }
-    if (validationErrors.phone || validationErrors.password) {
-      if (validationErrors.phone) setPhoneErrors([validationErrors.phone]);
+    if (validationErrors.email || validationErrors.password) {
+      if (validationErrors.email) setEmailErrors([validationErrors.email]);
       if (validationErrors.password) setPasswordErrors([validationErrors.password]);
       setIsLoading(false);
       return;
@@ -45,7 +45,7 @@ export default function LoginPage() {
     
 
     try {
-      const data: AuthResponse = await loginService(phone, password);
+      const data: AuthResponse = await loginService(email, password);
       const tokenVal = typeof data.token === 'string' ? data.token : typeof data.access_token === 'string' ? data.access_token : null;
       const user = data.user;
       if (!user || typeof user.role !== 'string') {
@@ -62,7 +62,11 @@ export default function LoginPage() {
         localStorage.setItem('authToken', tokenVal);
       }
       localStorage.setItem('isAuthenticated', 'true');
-      localStorage.setItem('userPhone', user.phone);
+      if ((user as any).email) {
+        localStorage.setItem('userEmail', (user as any).email);
+      } else if (user.phone) {
+        localStorage.setItem('userPhone', user.phone);
+      }
       localStorage.setItem('userRole', user.role);
       if (rememberMe) {
         localStorage.setItem('rememberMe', 'true');
@@ -74,10 +78,10 @@ export default function LoginPage() {
         const gen: string[] = [];
         if (error.message) gen.push(error.message);
         if (fe) {
-          const p = fe['phone'];
+          const p = fe['email'];
           const pw = fe['password'];
-          if (Array.isArray(p)) setPhoneErrors(p);
-          else if (typeof p === 'string') setPhoneErrors([p]);
+          if (Array.isArray(p)) setEmailErrors(p);
+          else if (typeof p === 'string') setEmailErrors([p]);
           if (Array.isArray(pw)) setPasswordErrors(pw);
           else if (typeof pw === 'string') setPasswordErrors([pw]);
         }
@@ -143,22 +147,22 @@ export default function LoginPage() {
               <div className="input-wrapper">
                 <div className="input-icon">
                   <svg viewBox="0 0 24 24" fill="none">
-                    <path d="M16 7C16 9.20914 14.2091 11 12 11C9.79086 11 8 9.20914 8 7C8 4.79086 9.79086 3 12 3C14.2091 3 16 4.79086 16 7Z" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M12 14C8.13401 14 5 17.134 5 21H19C19 17.134 15.866 14 12 14Z" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M4 4H20C21.1 4 22 4.9 22 6V18C22 19.1 21.1 20 20 20H4C2.9 20 2 19.1 2 18V6C2 4.9 2.9 4 4 4Z" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M22 6L12 13L2 6" stroke="currentColor" strokeWidth="2"/>
                   </svg>
                 </div>
                 <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="modern-input"
                   placeholder=" "
                   required
                 />
-                <label className="floating-label">رقم الهاتف</label>
-                {phoneErrors.length > 0 && (
+                <label className="floating-label">البريد الإلكتروني</label>
+                {emailErrors.length > 0 && (
                   <ul className="error-list field-errors">
-                    {phoneErrors.map((msg, idx) => (
+                    {emailErrors.map((msg, idx) => (
                       <li key={idx}>{msg}</li>
                     ))}
                   </ul>

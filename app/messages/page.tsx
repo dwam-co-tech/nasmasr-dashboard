@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import Image from "next/image";
 import { fetchSupportInbox, fetchSupportConversation, replySupport, markSupportConversationRead, fetchSupportStats } from "@/services/supportInbox";
-import { fetchUsersSummary } from "@/services/users";
+import { fetchUsersSummary, fetchUsersSummaryPage } from "@/services/users";
 import type { SupportInboxItem, SupportStatsResponse } from "@/models/support-inbox";
+import type { UserSummary } from "@/models/users";
 
-type ChatMessage = { id: string; sender: "admin" | "user"; content: string; time: string; status?: "sent" | "delivered"; srcId?: number };
+ type ChatMessage = { id: string; sender: "admin" | "user"; content: string; time: string; status?: "sent" | "delivered"; srcId?: number; imageUrl?: string };
 type QuickReply = { id: string; title: string; content: string };
 
 export default function MessagesPage() {
@@ -28,6 +29,7 @@ export default function MessagesPage() {
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | string | null>(null);
   const pollRef = useRef<number | null>(null);
+  const inboxPollRef = useRef<number | null>(null);
   const [supportStats, setSupportStats] = useState<SupportStatsResponse | null>(null);
   const quickReplies: QuickReply[] = [
     { id: "qr1", title: "تحية", content: "مرحبًا، كيف يمكنني مساعدتك؟" },
@@ -40,6 +42,8 @@ export default function MessagesPage() {
 
   const [isStartModalOpen, setIsStartModalOpen] = useState(false);
   const [startSearch, setStartSearch] = useState("");
+  const [startUsers, setStartUsers] = useState<UserSummary[]>([]);
+  const [startLoading, setStartLoading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -59,6 +63,30 @@ export default function MessagesPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    const loadAllUsers = async () => {
+      if (!isStartModalOpen) return;
+      setStartLoading(true);
+      try {
+        const first = await fetchUsersSummary();
+        const baseUsers = Array.isArray(first?.users) ? first.users : [];
+        setStartUsers(baseUsers);
+        const lastPage = Number(first?.meta?.last_page || 1);
+        for (let p = 2; p <= lastPage; p++) {
+          try {
+            const pageResp = await fetchUsersSummaryPage(p);
+            const more = Array.isArray(pageResp?.users) ? pageResp.users : [];
+            if (more.length) setStartUsers((prev) => [...prev, ...more]);
+          } catch {}
+        }
+      } catch {
+        setStartUsers([]);
+      } finally {
+        setStartLoading(false);
+      }
+    };
+    loadAllUsers();
+  }, [isStartModalOpen]);
   useEffect(() => {
     try {
       const unreadTotal = inboxItems.reduce((sum, it) => sum + (Number(it.unread_count) || 0), 0);
@@ -187,6 +215,35 @@ export default function MessagesPage() {
   }, [currentUserId, selectedConversationId]);
 
   useEffect(() => {
+    if (inboxPollRef.current) {
+      clearInterval(inboxPollRef.current);
+      inboxPollRef.current = null;
+    }
+    const tick = async () => {
+      try {
+        const resp = await fetchSupportInbox();
+        const items = (resp?.data ?? []).filter(Boolean) as SupportInboxItem[];
+        const merged = items.map((it) =>
+          selectedConversationId && it.conversation_id === selectedConversationId
+            ? { ...it, unread_count: 0 }
+            : it
+        );
+        setInboxItems(merged);
+        if (!selectedConversationId && merged.length > 0) {
+          setSelectedConversationId(merged[0].conversation_id);
+        }
+      } catch {}
+    };
+    inboxPollRef.current = window.setInterval(tick, 5000);
+    return () => {
+      if (inboxPollRef.current) {
+        clearInterval(inboxPollRef.current);
+        inboxPollRef.current = null;
+      }
+    };
+  }, [selectedConversationId]);
+
+  useEffect(() => {
     if (bubblesRef.current) {
       bubblesRef.current.scrollTop = bubblesRef.current.scrollHeight;
     }
@@ -260,17 +317,16 @@ export default function MessagesPage() {
     return ts;
   };
 
-  const startFilteredInbox = useMemo(() => {
+  const startFilteredUsers = useMemo(() => {
     const term = startSearch.trim().toLowerCase();
-    if (!term) return inboxItems;
-    return inboxItems.filter((it) => {
-      const name = (it.user?.name || "").toLowerCase();
-      const phone = (it.user?.phone || "").toLowerCase();
-      const email = (it.user?.email || "").toLowerCase();
-      const lastText = (it.last_message || "").toLowerCase();
-      return name.includes(term) || phone.includes(term) || email.includes(term) || lastText.includes(term);
+    if (!term) return startUsers;
+    return startUsers.filter((u) => {
+      const name = (u.name || "").toLowerCase();
+      const code = (u.user_code || "").toLowerCase();
+      const phone = (u.phone || "").toLowerCase();
+      return name.includes(term) || code.includes(term) || phone.includes(term);
     });
-  }, [inboxItems, startSearch]);
+  }, [startUsers, startSearch]);
 
   const startConversationWithUser = (item: SupportInboxItem) => {
     const cid = item.conversation_id;
@@ -280,6 +336,38 @@ export default function MessagesPage() {
     setSelectedConversationId(cid);
     setIsStartModalOpen(false);
     setDesignMode(false);
+  };
+  const startConversationWithUserSummary = async (user: UserSummary) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await fetchSupportConversation(user.id);
+      const cid = resp.meta.conversation_id;
+      setCurrentUserId(resp.meta.user.id);
+      setSelectedConversationId(cid);
+      const last = (resp.data || [])[resp.data.length - 1];
+      const by = last ? (last.sender_id === resp.meta.user.id ? (resp.meta.user.name || "مستخدم") : "Admin") : null;
+      const item: SupportInboxItem = {
+        conversation_id: cid,
+        user: resp.meta.user,
+        last_message: last ? last.message : null,
+        last_message_at: last ? last.created_at : null,
+        last_message_by: by,
+        messages_count: Number(resp.meta.total || (resp.data || []).length),
+        unread_count: 0,
+      };
+      setInboxItems((prev) => {
+        const exists = prev.find((it) => it.conversation_id === cid);
+        if (exists) return prev.map((it) => (it.conversation_id === cid ? item : it));
+        return [item, ...prev];
+      });
+      setIsStartModalOpen(false);
+      setDesignMode(false);
+    } catch (e) {
+      setError((e as Error)?.message || "تعذر فتح محادثة المستخدم");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const sendMessage = async (content: string) => {
@@ -312,10 +400,29 @@ export default function MessagesPage() {
 
   const handleSend = () => { sendMessage(messageInput); };
   const handleQuickSend = (qr: QuickReply) => { sendMessage(qr.content); };
-  const appendEmoji = (emoji: string) => setMessageInput((prev) => prev + emoji);
+  const appendEmoji = (emoji: string) => {
+    setMessageInput((prev) => prev + emoji);
+    setShowEmojiPicker(false);
+  };
   const handleAttachFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    files.forEach((f) => sendMessage(`📎 ${f.name}`));
+    files.forEach((f) => {
+      if (!selectedConversationId) return;
+      if (f.type.startsWith("image/")) {
+        const url = URL.createObjectURL(f);
+        const msg: ChatMessage = {
+          id: `${selectedConversationId}-${msgIdRef.current++}`,
+          sender: "admin",
+          content: "",
+          imageUrl: url,
+          time: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+          status: "sent",
+        };
+        setMessagesByConv((prev) => ({ ...prev, [selectedConversationId]: [...(prev[selectedConversationId] || []), msg] }));
+      } else {
+        sendMessage(`📎 ${f.name}`);
+      }
+    });
     e.target.value = "";
     setShowAttachmentsPanel(false);
   };
@@ -375,23 +482,20 @@ export default function MessagesPage() {
               >
                 <Image src={"/profile.png"} alt="" width={36} height={36} className="messages-avatar" />
                 <div className="messages-user-meta">
-                  <div className="messages-user-name">{it.user?.name || "مستخدم"}</div>
+                  <div className="messages-user-name">
+                    {it.user?.name || "مستخدم"}
+                    {(() => {
+                      const unreadVal = Number(it.unread_count) || 0;
+                      return unreadVal > 0 ? (
+                        <span className="unread-badge">{unreadVal}</span>
+                      ) : null;
+                    })()}
+                  </div>
                   <div className="messages-user-extra">
                     <span className="last-text" dir="rtl" style={{ direction: 'rtl', textAlign: 'right' }}>{`${it.last_message_by ? `${it.last_message_by}: ` : ""}${it.last_message || ""}`}</span>
                     <span className="last-time">{formatTime(it.last_message_at)}</span>
                   </div>
                 </div>
-                {(() => {
-                  const unreadVal = Number(it.unread_count) || 0;
-                  return unreadVal > 0 ? (
-                    <div
-                      className="unread-circle"
-                      style={{ marginInlineStart: 'auto', minWidth: 24, height: 24, borderRadius: 12, background: '#22c55e', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', paddingInline: 6 }}
-                    >
-                      {unreadVal}
-                    </div>
-                  ) : null;
-                })()}
               </button>
             ))}
           </div>
@@ -462,13 +566,27 @@ export default function MessagesPage() {
                 <div className="chat-bubbles" ref={bubblesRef}>
                   {currentMessages.map((m) => (
                     <div key={m.id} className={`chat-bubble ${m.sender === "admin" ? "admin" : "user"}`}>
-                      <div className="bubble-content">{m.content}</div>
-                      <div className="bubble-time">
-                        {m.time}
-                        {m.sender === "admin" && (
-                          <span className={`bubble-status ${m.status}`}>{m.status === "delivered" ? "✓✓" : "✓"}</span>
-                        )}
-                      </div>
+                      {m.imageUrl ? (
+                        <>
+                          <img src={m.imageUrl} alt="" className="bubble-image" />
+                          <div className="bubble-time">
+                            {m.time}
+                            {m.sender === "admin" && (
+                              <span className={`bubble-status ${m.status}`}>{m.status === "delivered" ? "✓✓" : "✓"}</span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="bubble-content">{m.content}</div>
+                          <div className="bubble-time">
+                            {m.time}
+                            {m.sender === "admin" && (
+                              <span className={`bubble-status ${m.status}`}>{m.status === "delivered" ? "✓✓" : "✓"}</span>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))}
                   {isTyping && (
@@ -562,13 +680,13 @@ export default function MessagesPage() {
                 />
               </div>
               <div className="start-list">
-                {startFilteredInbox.map((it) => (
-                  <button key={it.conversation_id} className="start-item" onClick={() => startConversationWithUser(it)}>
+                {startFilteredUsers.map((u) => (
+                  <button key={u.id} className="start-item" onClick={() => startConversationWithUserSummary(u)}>
                     <Image src={"/profile.png"} alt="" width={36} height={36} className="start-avatar" />
                     <div className="start-meta">
-                      <div className="start-name">{it.user?.name || "مستخدم"}</div>
+                      <div className="start-name">{u.name || "مستخدم"}</div>
                       <div className="start-sub">
-                        <span className="start-code">{it.user?.phone || it.user?.email || ''}</span>
+                        <span className="start-code">{u.user_code || u.phone || ''}</span>
                       </div>
                     </div>
                   </button>

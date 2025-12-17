@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { fetchCarMakes, fetchCategoryFields, fetchCategoryFieldMaps, fetchCategoryMainSubsBatch, fetchGovernorates, postAdminGovernorates, createGovernorate, createCity, updateGovernorate, deleteGovernorate, updateCity, deleteCity, fetchGovernorateById, updateCategoryFieldOptions, fetchAdminMakesWithIds, postAdminMake, postAdminMakeModels, postAdminMainSection, postAdminSubSections, fetchAdminMainSectionsBatch, fetchAdminMainSections, deleteAdminMainSection, deleteAdminSubSection, fetchAdminSubSections, updateAdminMake, deleteAdminMake, updateAdminModel, deleteAdminModel, fetchMakeModels, updateAdminMainSection, updateAdminSubSection, fetchAdminCategories, updateAdminCategoryActive } from '@/services/makes';
+import { fetchCarMakes, fetchCategoryFields, fetchCategoryFieldMaps, fetchCategoryMainSubsBatch, fetchGovernorates, postAdminGovernorates, createGovernorate, createCity, updateGovernorate, deleteGovernorate, updateCity, deleteCity, fetchGovernorateById, updateCategoryFieldOptions, fetchAdminMakesWithIds, postAdminMake, postAdminMakeModels, postAdminMainSection, postAdminSubSections, fetchAdminMainSectionsBatch, fetchAdminMainSections, deleteAdminMainSection, deleteAdminSubSection, fetchAdminSubSections, fetchPublicSubSections, updateAdminMake, deleteAdminMake, updateAdminModel, deleteAdminModel, fetchMakeModels, updateAdminMainSection, updateAdminSubSection, fetchAdminCategories, updateAdminCategoryActive, updateAdminCategoryImage, deleteAdminCategoryImage } from '@/services/makes';
+import { fetchSystemSettings, updateSystemSettings, updatePublicSystemSettingsImage } from '@/services/systemSettings';
+import type { SystemSettingsData } from '@/models/system-settings';
 import type { AdminMainSectionRecord, AdminSubSectionRecord, AdminCategoryListItem } from '@/models/makes';
 
 interface Category {
@@ -66,6 +68,7 @@ export default function CategoriesPage() {
   const [managingCategoryId, setManagingCategoryId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [showUnifiedImagesModal, setShowUnifiedImagesModal] = useState(false);
   interface Toast { id: string; message: string; type: 'success' | 'error' | 'info' | 'warning'; }
   const [toasts, setToasts] = useState<Toast[]>([]);
   const showToast = (message: string, type: Toast['type'] = 'info') => {
@@ -91,6 +94,13 @@ export default function CategoriesPage() {
   };
   const [selectedGovernorate, setSelectedGovernorate] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
+  const [systemSettings, setSystemSettings] = useState<SystemSettingsData | null>(null);
+  const [unifiedImagesSettings, setUnifiedImagesSettings] = useState<SystemSettingsData | null>(null);
+  const [unifiedImagesLoading, setUnifiedImagesLoading] = useState(false);
+  const [unifiedImagesError, setUnifiedImagesError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImage, setUploadingImage] = useState<string | null>(null);
+  const [defaultImagePreview, setDefaultImagePreview] = useState<Record<string, string>>({});
   const [BRANDS_MODELS, setBRANDS_MODELS] = useState<Record<string, string[]>>({});
   const [MAKE_IDS, setMAKE_IDS] = useState<Record<string, number>>({});
   const [MODEL_IDS_BY_BRAND, setMODEL_IDS_BY_BRAND] = useState<Record<string, Record<string, number>>>({});
@@ -105,8 +115,9 @@ export default function CategoriesPage() {
     const isAbs = /^https?:\/\//i.test(u);
     const isRel = u.startsWith('/');
     const looksFile = /\.(png|jpe?g|webp)$/i.test(u);
-    if (!isAbs && !isRel && looksFile) u = '/' + u.replace(/^\.?\/?/, '');
-    if (u.startsWith('/')) u = `https://api.nasmasr.app${u}`;
+    if (!isAbs && !isRel && (u.startsWith('defaults/') || looksFile)) u = '/' + u.replace(/^\.?\/?/, '');
+    if (u.startsWith('/defaults/')) u = `https://api.nasmasr.app/storage${u}`;
+    else if (u.startsWith('/')) u = `https://api.nasmasr.app${u}`;
     try { new URL(u); return u; } catch { return null; }
   };
   useEffect(() => {
@@ -178,6 +189,13 @@ export default function CategoriesPage() {
         }
       })
       .catch(() => {});
+    fetchSystemSettings(token)
+      .then((data) => {
+        if (data && data.data) {
+          setSystemSettings(data.data);
+        }
+      })
+      .catch(() => {});
   }, []);
   const getErrMsg = (err: unknown, fallback: string): string => {
     if (typeof err === 'string') return err;
@@ -190,6 +208,37 @@ export default function CategoriesPage() {
       if (typeof e === 'string') return e;
     }
     return fallback;
+  };
+
+  const openUnifiedImagesModal = () => {
+    setShowUnifiedImagesModal(true);
+    setUnifiedImagesError(null);
+    setUnifiedImagesSettings(null);
+    setUnifiedImagesLoading(true);
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+    fetchSystemSettings(token)
+      .then((res) => {
+        const out = (() => {
+          if (!res || typeof res !== 'object') return null;
+          const o = res as Record<string, unknown>;
+          const candidate = o['data'] && typeof o['data'] === 'object' ? (o['data'] as Record<string, unknown>) : o;
+          if (!candidate || typeof candidate !== 'object') return null;
+          return candidate as unknown as SystemSettingsData;
+        })();
+        if (!out) {
+          setUnifiedImagesError('تعذر قراءة إعدادات النظام');
+          setUnifiedImagesSettings(null);
+          return;
+        }
+        setUnifiedImagesSettings(out);
+      })
+      .catch((err) => {
+        setUnifiedImagesSettings(null);
+        setUnifiedImagesError(getErrMsg(err, 'تعذر جلب إعدادات النظام'));
+      })
+      .finally(() => {
+        setUnifiedImagesLoading(false);
+      });
   };
   const propagateBrandDelete = (name: string) => {
     setBRANDS_MODELS(prev => { const n = { ...prev }; delete n[name]; return n; });
@@ -622,6 +671,7 @@ export default function CategoriesPage() {
       'missing',
     ], token),
       fetchCategoryMainSubsBatch([
+        'jobs',
         'spare-parts',
         'animals',
         'food-products',
@@ -654,7 +704,7 @@ export default function CategoriesPage() {
         'heavy-transport',
       ], token),
       fetchAdminMainSectionsBatch([
-        'spare-parts','animals','food-products','restaurants','stores','groceries','kids-toys','home-services','furniture','home-tools','home-appliances','electronics','health','education','shipping','mens-clothes','watches-jewelry','free-professions','car-services','maintenance','construction','gym','light-vehicles','production-lines','farm-products','lighting-decor','missing','tools','wholesale','heavy-transport'
+        'jobs','spare-parts','animals','food-products','restaurants','stores','groceries','kids-toys','home-services','furniture','home-tools','home-appliances','electronics','health','education','shipping','mens-clothes','watches-jewelry','free-professions','car-services','maintenance','construction','gym','light-vehicles','production-lines','farm-products','lighting-decor','missing','tools','wholesale','heavy-transport'
       ], token),
     ])
       .then(([maps, mainSubs, mainWithIds]) => {
@@ -729,8 +779,17 @@ export default function CategoriesPage() {
         const jSpec = pick(j, ['specialization', 'specialty', 'تخصص']);
         setJobCategoryKey(findKey(j, ['job_category', 'category', 'فئة', 'مجال', 'قسم']));
         setJobSpecialtyKey(findKey(j, ['specialization', 'specialty', 'تخصص']));
-        if (jCat.length) setJobCategoryOptions(jCat);
-        if (jSpec.length) setJobSpecialtyOptions(jSpec);
+        const jobsMainSubsMap = Object.keys(mainSubs['jobs'] ?? {}).length
+          ? (mainSubs['jobs'] as Record<string, string[]>)
+          : buildMainSubs(maps['jobs'], ['job_category', 'category', 'فئة', 'مجال', 'قسم'], ['specialization', 'specialty', 'تخصص']);
+        setJOBS_MAIN_SUBS(jobsMainSubsMap);
+        const jobsCatsFromMap = Object.keys(jobsMainSubsMap);
+        if (jobsCatsFromMap.length) {
+          setJobCategoryOptions(jobsCatsFromMap);
+        } else {
+          if (jCat.length) setJobCategoryOptions(jCat);
+        }
+        setJobSpecialtyOptions([]);
         setPARTS_MAIN_SUBS(Object.keys(mainSubs['spare-parts'] ?? {}).length ? (mainSubs['spare-parts'] as Record<string, string[]>) : buildMainSubs(maps['spare-parts'], ['قطعة', 'part', 'نوع', 'رئيس', 'main', 'category', 'قسم'], ['compatible', 'متوافق', 'موديل', 'model', 'فرعي', 'sub', 'brand', 'ماركة']));
         setANIMALS_MAIN_SUBS(Object.keys(mainSubs['animals'] ?? {}).length ? (mainSubs['animals'] as Record<string, string[]>) : buildMainSubs(maps['animals'], ['نوع', 'animal', 'حيوان', 'طيور', 'category'], ['سلالة', 'breed', 'sub', 'فرعي']));
         setAnimalsMainKey(findKey(maps['animals'], ['نوع', 'animal', 'حيوان', 'طيور', 'category']));
@@ -835,6 +894,7 @@ export default function CategoriesPage() {
             const map = adminMap(slug);
             if (Object.keys(map).length) setter(map as T);
           };
+          applyAdmin('jobs', setJOBS_MAIN_SUBS);
           applyAdmin('animals', setANIMALS_MAIN_SUBS);
           applyAdmin('food-products', setFOOD_MAIN_SUBS);
           applyAdmin('restaurants', setRESTAURANTS_MAIN_SUBS);
@@ -912,6 +972,7 @@ export default function CategoriesPage() {
   const [newPartsMain, setNewPartsMain] = useState('');
   const [newPartsSubsBulk, setNewPartsSubsBulk] = useState('');
   const [ANIMALS_MAIN_SUBS, setANIMALS_MAIN_SUBS] = useState<Record<string, string[]>>({});
+  const [JOBS_MAIN_SUBS, setJOBS_MAIN_SUBS] = useState<Record<string, string[]>>({});
   const [selectedAnimalMain, setSelectedAnimalMain] = useState('');
   const [selectedAnimalSub, setSelectedAnimalSub] = useState('');
   const [newAnimalMain, setNewAnimalMain] = useState('');
@@ -961,6 +1022,43 @@ export default function CategoriesPage() {
   const [selectedFoodSub, setSelectedFoodSub] = useState('');
   const [newFoodMain, setNewFoodMain] = useState('');
   const [newFoodSubsBulk, setNewFoodSubsBulk] = useState('');
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!jobCategory) {
+        if (mounted) {
+          setJobSpecialtyOptions([]);
+          setJobSpecialty('');
+        }
+        return;
+      }
+      const mainId = await ensureMainSectionId('jobs', jobCategory);
+      if (!mainId) {
+        const list = JOBS_MAIN_SUBS[jobCategory] ?? [];
+        if (mounted) {
+          setJobSpecialtyOptions(list);
+          if (!list.includes(jobSpecialty)) setJobSpecialty('');
+        }
+        return;
+      }
+      try {
+        const subs = await fetchPublicSubSections(mainId);
+        const names = subs.map(s => String(s?.name || '').trim()).filter(Boolean);
+        const list = names.length ? names : (JOBS_MAIN_SUBS[jobCategory] ?? []);
+        if (mounted) {
+          setJobSpecialtyOptions(list);
+          if (!list.includes(jobSpecialty)) setJobSpecialty('');
+        }
+      } catch {
+        const list = JOBS_MAIN_SUBS[jobCategory] ?? [];
+        if (mounted) {
+          setJobSpecialtyOptions(list);
+          if (!list.includes(jobSpecialty)) setJobSpecialty('');
+        }
+      }
+    })();
+  return () => { mounted = false; };
+  }, [jobCategory, JOBS_MAIN_SUBS]);
   const [RESTAURANTS_MAIN_SUBS, setRESTAURANTS_MAIN_SUBS] = useState<Record<string, string[]>>({});
   const [selectedRestaurantMain, setSelectedRestaurantMain] = useState('');
   const [selectedRestaurantSub, setSelectedRestaurantSub] = useState('');
@@ -1109,6 +1207,38 @@ export default function CategoriesPage() {
 
   const [GOVERNORATES_MAP, setGOVERNORATES_MAP] = useState<Record<string, string[]>>({});
   const [GOVERNORATE_IDS, setGOVERNORATE_IDS] = useState<Record<string, number>>({});
+  const [CATEGORY_IMAGE_UPLOADING, setCATEGORY_IMAGE_UPLOADING] = useState<Record<number, boolean>>({});
+  const viewCategoryImage = (url?: string | null) => {
+    const src = getImageSrc(String(url || ''));
+    if (!src) return;
+    try { window.open(src, '_blank', 'noopener'); } catch {}
+  };
+  const uploadCategoryImage = async (categoryId: number, file: File) => {
+    setCATEGORY_IMAGE_UPLOADING(prev => ({ ...prev, [categoryId]: true }));
+    try {
+      const rec = await updateAdminCategoryImage(categoryId, file);
+      setCategories(prev => prev.map(c => (c.id === categoryId ? { ...c, homepageImage: rec.homepage_image } : c)));
+      showToast('تم تحديث الصورة', 'success');
+    } catch (err) {
+      const msg = getErrMsg(err, 'حدث خطأ في رفع الصورة');
+      showToast(msg, 'error');
+    } finally {
+      setCATEGORY_IMAGE_UPLOADING(prev => ({ ...prev, [categoryId]: false }));
+    }
+  };
+  const deleteCategoryImage = async (categoryId: number) => {
+    setCATEGORY_IMAGE_UPLOADING(prev => ({ ...prev, [categoryId]: true }));
+    try {
+      const rec = await deleteAdminCategoryImage(categoryId);
+      setCategories(prev => prev.map(c => (c.id === categoryId ? { ...c, homepageImage: rec.homepage_image } : c)));
+      showToast('تم حذف الصورة', 'success');
+    } catch (err) {
+      const msg = getErrMsg(err, 'حدث خطأ في حذف الصورة');
+      showToast(msg, 'error');
+    } finally {
+      setCATEGORY_IMAGE_UPLOADING(prev => ({ ...prev, [categoryId]: false }));
+    }
+  };
 
   const saveCitiesCacheById = (govId: number, names: string[]) => {
     try {
@@ -2642,64 +2772,56 @@ export default function CategoriesPage() {
     updateOptionsWithToast('doctors', doctorSpecialtyKey, next, 'تم تعديل التخصص');
     if (doctorSpecialty === prev) setDoctorSpecialty(n);
   };
-  const addJobCategoryOption = () => {
-    const v = newJobCategoryVal.trim();
-    if (!v) return;
-    const next = jobCategoryOptions.includes(v) ? jobCategoryOptions : [...jobCategoryOptions, v];
-    setJobCategoryOptions(next);
-    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم إضافة الفئة');
-    setNewJobCategoryVal('');
+  const addJobCategoryOption = async () => {
+    const name = newJobCategoryVal.trim();
+    if (!name) return;
+    await handleAddMain('jobs', name, setJOBS_MAIN_SUBS, setJobCategory, () => setNewJobCategoryVal(''));
+    setJobCategoryOptions(prev => (prev.includes(name) ? prev : [...prev, name]));
   };
   const deleteSelectedJobCategoryOption = () => {
     const v = jobCategory;
     if (!v) return;
-    const next = jobCategoryOptions.filter(x => x !== v);
-    setJobCategoryOptions(next);
-    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم حذف الفئة');
-    setJobCategory('');
+    handleDeleteMain('jobs', v, setJOBS_MAIN_SUBS, jobCategory, setJobCategory);
+    setJobCategoryOptions(prev => prev.filter(x => x !== v));
   };
   const deleteJobCategoryOption = (opt: string) => {
-    const next = jobCategoryOptions.filter(x => x !== opt);
-    setJobCategoryOptions(next);
-    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم حذف الفئة');
+    handleDeleteMain('jobs', opt, setJOBS_MAIN_SUBS, jobCategory, setJobCategory);
+    setJobCategoryOptions(prev => prev.filter(x => x !== opt));
     if (jobCategory === opt) setJobCategory('');
   };
   const renameJobCategoryOption = (prev: string, nextRaw: string) => {
     const n = nextRaw.trim();
     if (!n || prev === n) return;
-    const next = jobCategoryOptions.map(x => (x === prev ? n : x));
-    setJobCategoryOptions(next);
-    updateOptionsWithToast('jobs', jobCategoryKey, next, 'تم تعديل الفئة');
+    handleRenameMain('jobs', prev, n, setJOBS_MAIN_SUBS, jobCategory, setJobCategory);
+    setJobCategoryOptions(prevList => prevList.map(x => (x === prev ? n : x)));
     if (jobCategory === prev) setJobCategory(n);
   };
-  const addJobSpecialtyOption = () => {
-    const v = newJobSpecialtyVal.trim();
-    if (!v) return;
-    const next = jobSpecialtyOptions.includes(v) ? jobSpecialtyOptions : [...jobSpecialtyOptions, v];
-    setJobSpecialtyOptions(next);
-    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم إضافة التخصص');
-    setNewJobSpecialtyVal('');
+  const addJobSpecialtyOption = async () => {
+    if (!jobCategory) return;
+    const name = newJobSpecialtyVal.trim();
+    if (!name) return;
+    await handleAddSubsBulk('jobs', jobCategory, [name], setJOBS_MAIN_SUBS, setJobSpecialty, () => setNewJobSpecialtyVal(''));
+    setJobSpecialtyOptions(prev => (prev.includes(name) ? prev : [...prev, name]));
   };
   const deleteSelectedJobSpecialtyOption = () => {
     const v = jobSpecialty;
     if (!v) return;
-    const next = jobSpecialtyOptions.filter(x => x !== v);
-    setJobSpecialtyOptions(next);
-    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم حذف التخصص');
+    if (!jobCategory) return;
+    handleDeleteSub('jobs', jobCategory, v, setJOBS_MAIN_SUBS, jobSpecialty, setJobSpecialty);
+    setJobSpecialtyOptions(prev => prev.filter(x => x !== v));
     setJobSpecialty('');
   };
   const deleteJobSpecialtyOption = (opt: string) => {
-    const next = jobSpecialtyOptions.filter(x => x !== opt);
-    setJobSpecialtyOptions(next);
-    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم حذف التخصص');
+    if (!jobCategory) return;
+    handleDeleteSub('jobs', jobCategory, opt, setJOBS_MAIN_SUBS, jobSpecialty, setJobSpecialty);
+    setJobSpecialtyOptions(prev => prev.filter(x => x !== opt));
     if (jobSpecialty === opt) setJobSpecialty('');
   };
   const renameJobSpecialtyOption = (prev: string, nextRaw: string) => {
     const n = nextRaw.trim();
-    if (!n || prev === n) return;
-    const next = jobSpecialtyOptions.map(x => (x === prev ? n : x));
-    setJobSpecialtyOptions(next);
-    updateOptionsWithToast('jobs', jobSpecialtyKey, next, 'تم تعديل التخصص');
+    if (!n || prev === n || !jobCategory) return;
+    handleRenameSub('jobs', jobCategory, prev, n, setJOBS_MAIN_SUBS, jobSpecialty, setJobSpecialty);
+    setJobSpecialtyOptions(prevList => prevList.map(x => (x === prev ? n : x)));
     if (jobSpecialty === prev) setJobSpecialty(n);
   };
   const addFoodMain = () => {
@@ -3493,6 +3615,69 @@ export default function CategoriesPage() {
     ? categories.find(c => c.id === fieldOptionsEditor.categoryId)?.name || ''
     : '';
 
+  const getDefaultImageKey = (cat: Category): 'jobs_default_image' | 'doctors_default_image' | 'teachers_default_image' | null => {
+    const s = (cat.slug || '').toLowerCase();
+    const n = (cat.name || '').toLowerCase();
+    if (s === 'jobs' || n.includes('وظائف')) return 'jobs_default_image';
+    if (s === 'doctors' || n.includes('أطباء') || n.includes('اطباء')) return 'doctors_default_image';
+    if (s === 'teachers' || n.includes('مدرسين')) return 'teachers_default_image';
+    return null;
+  };
+
+  const handleDefaultImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const key = e.target.getAttribute('data-key');
+    if (!file || !key) return;
+    const previewUrl = URL.createObjectURL(file);
+    setDefaultImagePreview(prev => ({ ...prev, [key]: previewUrl }));
+    
+    setUploadingImage(key);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      const res = await updatePublicSystemSettingsImage(key, file, token);
+      const out = (() => {
+        if (!res || typeof res !== 'object') return null;
+        const o = res as Record<string, unknown>;
+        const candidate = o['data'] && typeof o['data'] === 'object' ? (o['data'] as Record<string, unknown>) : o;
+        if (!candidate || typeof candidate !== 'object') return null;
+        return candidate as unknown as SystemSettingsData;
+      })();
+      if (out) {
+        setSystemSettings(out);
+        setUnifiedImagesSettings(out);
+        showToast('تم تحديث الصورة الافتراضية بنجاح', 'success');
+      } else {
+        showToast('تم الرفع ولكن تعذر قراءة الاستجابة', 'warning');
+      }
+    } catch (err) {
+      const msg = getErrMsg(err, 'حدث خطأ في تحديث الصورة');
+      showToast(msg, 'error');
+    } finally {
+      setUploadingImage(null);
+      setDefaultImagePreview(prev => { const n = { ...prev }; delete n[key]; return n; });
+      URL.revokeObjectURL(previewUrl);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteDefaultImage = async (key: 'jobs_default_image' | 'doctors_default_image' | 'teachers_default_image') => {
+    setUploadingImage(key);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+      const res = await updateSystemSettings({ [key]: '' }, token);
+      if (res && res.data) {
+        setSystemSettings(res.data);
+        showToast('تم حذف الصورة الافتراضية', 'success');
+      }
+    } catch (err) {
+      const msg = getErrMsg(err, 'حدث خطأ في حذف الصورة');
+      showToast(msg, 'error');
+    } finally {
+      setUploadingImage(null);
+      setDefaultImagePreview(prev => { const n = { ...prev }; delete n[key]; return n; });
+    }
+  };
+
   return (
     <div className="categories-page">
       {/* Header */}
@@ -3654,6 +3839,66 @@ export default function CategoriesPage() {
               </div> */}
             </div>
           </div>
+          <div className="inline-actions">
+            <button className="btn-add" onClick={openUnifiedImagesModal}>
+              إدارة صور الإعلانات الموحدة
+            </button>
+          </div>
+          {showUnifiedImagesModal && (
+            <div className="modal-overlay" onClick={() => setShowUnifiedImagesModal(false)}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h3>إدارة صور الإعلانات الموحدة</h3>
+                  <button className="modal-close" onClick={() => setShowUnifiedImagesModal(false)}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <div className="favorites-grid">
+                    {unifiedImagesLoading ? (
+                      <div className="favorite-item">
+                        <span className="favorite-label">جاري التحميل...</span>
+                      </div>
+                    ) : unifiedImagesError ? (
+                      <div className="favorite-item">
+                        <span className="favorite-label">{unifiedImagesError}</span>
+                      </div>
+                    ) : (
+                      (() => {
+                        const items: Array<{ k: 'jobs_default_image' | 'doctors_default_image' | 'teachers_default_image'; label: string }> = [
+                          { k: 'jobs_default_image', label: 'الوظائف' },
+                          { k: 'doctors_default_image', label: 'الأطباء' },
+                          { k: 'teachers_default_image', label: 'المدرسين' },
+                        ];
+                        return items.map(({ k, label }) => {
+                          const raw = unifiedImagesSettings ? unifiedImagesSettings[k] : '';
+                          const src = getImageSrc(String(raw || ''));
+                          return (
+                            <div key={k} className="favorite-item">
+                              <span className="favorite-label">{label}</span>
+                              {src ? <Image src={src} alt={label} width={160} height={120} unoptimized /> : <span>لا توجد صورة</span>}
+                              <div className="inline-actions" style={{ marginInlineStart: 12 }}>
+                                <button
+                                  className="btn-add"
+                                  onClick={() => {
+                                    if (fileInputRef.current) {
+                                      fileInputRef.current.setAttribute('data-key', k);
+                                      fileInputRef.current.click();
+                                    }
+                                  }}
+                                  disabled={uploadingImage === k}
+                                >
+                                  {uploadingImage === k ? 'جاري الرفع...' : (src ? 'استبدال' : 'رفع صورة')}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="categories-grid">
             {filteredCategories.length > 0 ? (
               filteredCategories.map((category) => (
@@ -3663,12 +3908,15 @@ export default function CategoriesPage() {
                       <div className="category-info">
                         <span className="category-icon" suppressHydrationWarning>
                           {(() => {
-                            const src = getImageSrc(category.homepageImage || category.icon);
-                            return src ? (
-                              <Image src={src} alt={category.name} width={64} height={64} />
-                            ) : (
-                              category.icon
-                            );
+                            const defKey = getDefaultImageKey(category);
+                            const sysPreview = defKey ? defaultImagePreview[defKey] : undefined;
+                            const sysRaw = defKey && systemSettings ? systemSettings[defKey] : '';
+                            const sysSrc = getImageSrc(String(sysRaw || ''));
+                            const homepageSrc = getImageSrc(category.homepageImage);
+                            const finalSrc = sysPreview || sysSrc || homepageSrc || null;
+                            return finalSrc ? (
+                              <Image src={finalSrc} alt={category.name} width={64} height={64} unoptimized />
+                            ) : null
                           })()}
                         </span>
                         <div className="category-details">
@@ -3944,6 +4192,75 @@ export default function CategoriesPage() {
                               <button className="btn-add" onClick={addTeacherSpecialtyOption}>إضافة</button>
                             </div>
                           </div>
+                          <div className="location-group">
+                            <label className="location-label">الصورة الموحدة للقسم</label>
+                            {(() => {
+                              const defKey = getDefaultImageKey(category);
+                              if (!defKey) return null;
+                              const previewSrc = defaultImagePreview[defKey];
+                              const fullSrc = previewSrc || (defKey && systemSettings ? getImageSrc(systemSettings[defKey]) : null);
+                              return fullSrc ? (
+                                <div className="inline-actions">
+                                  <div
+                                    className="image-preview"
+                                    onClick={() => viewCategoryImage(fullSrc!)}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    <Image
+                                      src={fullSrc!}
+                                      alt="صورة القسم"
+                                      width={260}
+                                      height={188}
+                                    />
+                                  </div>
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => viewCategoryImage(fullSrc!)}
+                                  >
+                                    عرض
+                                  </button>
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => {
+                                      if (fileInputRef.current) {
+                                        fileInputRef.current.setAttribute('data-key', defKey);
+                                        fileInputRef.current.click();
+                                      }
+                                    }}
+                                    disabled={uploadingImage === defKey}
+                                  >
+                                    {uploadingImage === defKey ? 'جاري الرفع...' : 'استبدال'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-actions">
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => {
+                                      if (fileInputRef.current) {
+                                        fileInputRef.current.setAttribute('data-key', defKey);
+                                        fileInputRef.current.click();
+                                      }
+                                    }}
+                                    disabled={uploadingImage === defKey}
+                                  >
+                                    {uploadingImage === defKey ? 'جاري الرفع...' : 'رفع صورة'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                            <input
+                              id={`cat-img-${category.id}`}
+                              type="file"
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) uploadCategoryImage(category.id, f);
+                                e.currentTarget.value = '';
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
                     )}
@@ -3971,6 +4288,75 @@ export default function CategoriesPage() {
                               />
                               <button className="btn-add" onClick={addDoctorSpecialtyOption}>إضافة</button>
                             </div>
+                          </div>
+                          <div className="location-group">
+                            <label className="location-label">الصورة الموحدة للقسم</label>
+                            {(() => {
+                              const defKey = getDefaultImageKey(category);
+                              if (!defKey) return null;
+                              const previewSrc = defaultImagePreview[defKey];
+                              const fullSrc = previewSrc || (defKey && systemSettings ? getImageSrc(systemSettings[defKey]) : null);
+                              return fullSrc ? (
+                                <div className="inline-actions">
+                                  <div
+                                    className="image-preview"
+                                    onClick={() => viewCategoryImage(fullSrc!)}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    <Image
+                                      src={fullSrc!}
+                                      alt="صورة القسم"
+                                      width={260}
+                                      height={188}
+                                    />
+                                  </div>
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => viewCategoryImage(fullSrc!)}
+                                  >
+                                    عرض
+                                  </button>
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => {
+                                      if (fileInputRef.current) {
+                                        fileInputRef.current.setAttribute('data-key', defKey);
+                                        fileInputRef.current.click();
+                                      }
+                                    }}
+                                    disabled={uploadingImage === defKey}
+                                  >
+                                    {uploadingImage === defKey ? 'جاري الرفع...' : 'استبدال'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-actions">
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => {
+                                      if (fileInputRef.current) {
+                                        fileInputRef.current.setAttribute('data-key', defKey);
+                                        fileInputRef.current.click();
+                                      }
+                                    }}
+                                    disabled={uploadingImage === defKey}
+                                  >
+                                    {uploadingImage === defKey ? 'جاري الرفع...' : 'رفع صورة'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                            <input
+                              id={`cat-img-${category.id}`}
+                              type="file"
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) uploadCategoryImage(category.id, f);
+                                e.currentTarget.value = '';
+                              }}
+                            />
                           </div>
                         </div>
                       </div>
@@ -4008,7 +4394,8 @@ export default function CategoriesPage() {
                               onChange={(v) => setJobSpecialty(v)}
                               onDelete={(opt) => deleteJobSpecialtyOption(opt)}
                               onEdit={(prev, next) => renameJobSpecialtyOption(prev, next)}
-                              placeholder="اختر التخصص"
+                              disabled={!jobCategory}
+                              placeholder={jobCategory ? 'اختر التخصص' : 'اختر التصنيف أولًا'}
                             />
                             <div className="inline-actions">
                               <input
@@ -4021,9 +4408,79 @@ export default function CategoriesPage() {
                               <button className="btn-add" onClick={addJobSpecialtyOption}>إضافة</button>
                             </div>
                           </div>
+                          <div className="location-group">
+                            <label className="location-label">الصورة الموحدة للقسم</label>
+                            {(() => {
+                              const defKey = getDefaultImageKey(category);
+                              if (!defKey) return null;
+                              const previewSrc = defaultImagePreview[defKey];
+                              const fullSrc = previewSrc || (defKey && systemSettings ? getImageSrc(systemSettings[defKey]) : null);
+                              return fullSrc ? (
+                                <div className="inline-actions">
+                                  <div
+                                    className="image-preview"
+                                    onClick={() => viewCategoryImage(fullSrc!)}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    <Image
+                                      src={fullSrc!}
+                                      alt="صورة القسم"
+                                      width={260}
+                                      height={188}
+                                    />
+                                  </div>
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => viewCategoryImage(fullSrc!)}
+                                  >
+                                    عرض
+                                  </button>
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => {
+                                      if (fileInputRef.current) {
+                                        fileInputRef.current.setAttribute('data-key', defKey);
+                                        fileInputRef.current.click();
+                                      }
+                                    }}
+                                    disabled={uploadingImage === defKey}
+                                  >
+                                    {uploadingImage === defKey ? 'جاري الرفع...' : 'استبدال'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-actions">
+                                  <button
+                                    className="btn-add"
+                                    onClick={() => {
+                                      if (fileInputRef.current) {
+                                        fileInputRef.current.setAttribute('data-key', defKey);
+                                        fileInputRef.current.click();
+                                      }
+                                    }}
+                                    disabled={uploadingImage === defKey}
+                                  >
+                                    {uploadingImage === defKey ? 'جاري الرفع...' : 'رفع صورة'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                            <input
+                              id={`cat-img-${category.id}`}
+                              type="file"
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) uploadCategoryImage(category.id, f);
+                                e.currentTarget.value = '';
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
                     )}
+                    
                     {category.slug === 'food-products' && (
                       <div className="category-fields">
                         <h4>إدارة الفئات الرئيسية والفرعية للمنتجات:</h4>
@@ -6097,6 +6554,14 @@ export default function CategoriesPage() {
           </div>
         </div>
       )}
+      {/* Hidden input for default system settings images */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleDefaultImageUpload}
+      />
     </div>
   );
 }

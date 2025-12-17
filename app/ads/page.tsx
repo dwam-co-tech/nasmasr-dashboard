@@ -859,10 +859,10 @@ function AdsManagement() {
               ) : selectedAdDetails ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0' }}>
                   {/* Images Section - Left/Top */}
-                  <div style={{ padding: '1.5rem', background: '#f9fafb', borderLeft: '1px solid #e5e7eb' }}>
+                  <div className="sticky-image-container" style={{ padding: '1.5rem', background: '#f9fafb', borderLeft: '1px solid #e5e7eb' }}>
                     {currentImageUrl ? (
                       <div style={{ marginBottom: '1rem', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-                        <img src={currentImageUrl} alt="Main" style={{ width: '100%', height: 'auto', display: 'block' }} />
+                        <img src={currentImageUrl} alt="Main" className="ad-modal-main-image" />
                       </div>
                     ) : (
                       <div style={{ padding: '2rem', textAlign: 'center', background: '#e5e7eb', borderRadius: '8px', marginBottom: '1rem' }}>لا توجد صورة</div>

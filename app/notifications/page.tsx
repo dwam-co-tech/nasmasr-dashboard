@@ -2,33 +2,32 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UserSummary } from '@/models/users';
-import { sendNotification as sendNotificationApi, fetchAllUsersSummary } from '@/services/notifications';
-
-interface AdRequest {
-  id: string;
-  title: string;
-  advertiser: string;
-  category: string;
-  status: 'pending' | 'approved' | 'rejected';
-  submittedAt: string;
-  description: string;
-  price: number;
-  location: string;
-  phone?: string;
-  email?: string;
-}
-
-interface QuickReply {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-}
+import type { AdminNotificationData } from '@/models/notifications';
+import { sendNotification as sendNotificationApi, fetchAllUsersSummary, fetchAdminNotifications, fetchAdminNotificationsCount, markAdminNotificationRead } from '@/services/notifications';
 
 interface Toast {
   id: string;
   type: 'success' | 'error' | 'info';
   message: string;
+}
+
+const adminNotificationTypeLabel: Record<string, string> = {
+  default: 'النظام',
+  system: 'النظام',
+  listing_pending: 'إعلان قيد المراجعة',
+  listing_approved: 'تمت الموافقة على إعلان',
+  listing_rejected: 'تم رفض إعلان',
+  new_report: 'بلاغ جديد',
+  promotion: 'ترويج',
+  message: 'رسالة',
+  payment: 'مدفوعات',
+  subscription: 'اشتراك',
+};
+
+function getAdminNotificationTypeLabel(type?: string | null): string {
+  const key = String(type || '').trim();
+  if (!key) return adminNotificationTypeLabel.system;
+  return adminNotificationTypeLabel[key] ?? key;
 }
 
 function DateInput(props: { value: string; onChange: (v: string) => void }) {
@@ -161,13 +160,15 @@ function DateInput(props: { value: string; onChange: (v: string) => void }) {
 }
 
 export default function NotificationsPage() {
-  const [showQuickReplyModal, setShowQuickReplyModal] = useState(false);
-  const [selectedAdRequest, setSelectedAdRequest] = useState<AdRequest | null>(null);
-  const [showAdDetails, setShowAdDetails] = useState(false);
-  const [editingQuickReply, setEditingQuickReply] = useState<QuickReply | null>(null);
+  const [adminNotifications, setAdminNotifications] = useState<AdminNotificationData[]>([]);
+  const [notificationsPage, setNotificationsPage] = useState(1);
+  const [notificationsMeta, setNotificationsMeta] = useState<{ current_page: number; last_page: number; total: number } | null>(null);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [markingReadById, setMarkingReadById] = useState<Record<number, boolean>>({});
+
   const [dateFilter, setDateFilter] = useState<{ start: string; end: string }>({ start: '', end: '' });
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const pageSize = 3;
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const [sendNotifOpen, setSendNotifOpen] = useState(false);
@@ -179,24 +180,6 @@ export default function NotificationsPage() {
   const [notifTitle, setNotifTitle] = useState('');
   const [notifBody, setNotifBody] = useState('');
   const [sending, setSending] = useState(false);
-
-  const [adRequests, setAdRequests] = useState<AdRequest[]>([]);
-
-
-  const handleViewAdDetails = (ad: AdRequest) => {
-    setSelectedAdRequest(ad);
-    setShowAdDetails(true);
-  };
-
-
-  const formatPrice = (price: number) => {
-    if (price === 0) return 'غير محدد';
-    return new Intl.NumberFormat('ar-EG', {
-      style: 'currency',
-      currency: 'EGP',
-      minimumFractionDigits: 0
-    }).format(price);
-  };
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -217,8 +200,8 @@ export default function NotificationsPage() {
     }, 3500);
   };
 
-  const isWithinRange = (submittedAt: string, start: string, end: string) => {
-    const sub = new Date(submittedAt);
+  const isWithinRange = (dateString: string, start: string, end: string) => {
+    const sub = new Date(dateString);
     const s = start ? new Date(start) : null;
     const e = end ? new Date(end) : null;
     if (s && sub < s) return false;
@@ -230,9 +213,16 @@ export default function NotificationsPage() {
     return true;
   };
 
-  const filteredAdRequests = useMemo(() => {
-    return adRequests.filter(ad => isWithinRange(ad.submittedAt, dateFilter.start, dateFilter.end));
-  }, [adRequests, dateFilter]);
+  const filteredAdminNotifications = useMemo(() => {
+    const start = dateFilter.start;
+    const end = dateFilter.end;
+    if (!start && !end) return adminNotifications;
+    return adminNotifications.filter((n) => {
+      const dt = n.created_at || n.updated_at || '';
+      if (!dt) return false;
+      return isWithinRange(dt, start, end);
+    });
+  }, [adminNotifications, dateFilter]);
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -248,15 +238,51 @@ export default function NotificationsPage() {
     return filteredUsers.every(u => selectedUserIds.has(u.id));
   }, [filteredUsers, selectedUserIds]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredAdRequests.length / pageSize));
-  const paginatedAdRequests = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    return filteredAdRequests.slice(startIndex, startIndex + pageSize);
-  }, [filteredAdRequests, currentPage]);
+  useEffect(() => {
+    let cancelled = false;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+    const load = async () => {
+      setNotificationsLoading(true);
+      setNotificationsError(null);
+      try {
+        const res = await fetchAdminNotifications(notificationsPage, token);
+        if (cancelled) return;
+        setAdminNotifications(res.data || []);
+        setNotificationsMeta({
+          current_page: res.current_page,
+          last_page: res.last_page,
+          total: res.total,
+        });
+      } catch (e) {
+        if (cancelled) return;
+        const m = e instanceof Error ? e.message : 'تعذر جلب الإشعارات';
+        setNotificationsError(m);
+      } finally {
+        if (!cancelled) setNotificationsLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [notificationsPage]);
 
   useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(1);
-  }, [totalPages, currentPage]);
+    let cancelled = false;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+    const loadCount = async () => {
+      try {
+        const c = await fetchAdminNotificationsCount(token);
+        if (!cancelled) setUnreadCount(c);
+      } catch {}
+    };
+    loadCount();
+    const id = setInterval(loadCount, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     if (!sendNotifOpen) return;
@@ -303,6 +329,34 @@ export default function NotificationsPage() {
     }
   };
 
+  const handleMarkRead = async (id: number) => {
+    if (markingReadById[id]) return;
+    const target = adminNotifications.find((n) => n.id === id);
+    if (!target || target.read_at) return;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined;
+    const prevReadAt = target.read_at;
+    setMarkingReadById((prev) => ({ ...prev, [id]: true }));
+    setAdminNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: n.read_at || new Date().toISOString() } : n)));
+    setUnreadCount((c) => Math.max(0, c - 1));
+    try {
+      await markAdminNotificationRead(id, token);
+    } catch (e) {
+      setAdminNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: prevReadAt || null } : n)));
+      const m = e instanceof Error ? e.message : 'تعذر تعليم الإشعار كمقروء';
+      showToast(m, 'error');
+    } finally {
+      try {
+        const c = await fetchAdminNotificationsCount(token);
+        setUnreadCount(c);
+      } catch {}
+      setMarkingReadById((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
   const toggleSelectUser = (id: number) => {
     setSelectedUserIds((prev) => {
       const next = new Set(prev);
@@ -325,8 +379,13 @@ export default function NotificationsPage() {
       <div className="notifications-header">
         <div className="header-content" style={{ justifyContent: 'space-between' }}>
           <div>
-            <h1 className="page-title">الإشعارات </h1>
-            <p className="page-description">سجل إشعارات طلبات نشر الإعلانات</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <h1 className="page-title" style={{ margin: 0 }}>الإشعارات</h1>
+              <span className={`notifications-unread-badge ${unreadCount ? 'has-unread' : ''}`}>
+                غير مقروء: {unreadCount}
+              </span>
+            </div>
+            <p className="page-description">سجل إشعارات النظام</p>
           </div>
           <div className="header-actions">
             <button className="btn-submit" onClick={() => setSendNotifOpen(true)}>
@@ -337,20 +396,52 @@ export default function NotificationsPage() {
       </div>
 
       <div className="campaigns-section">
+        <div className="notifications-toolbar">
+          <div className="notifications-counter">
+            <span className="notifications-counter-dot" />
+            <span className="notifications-counter-label">إشعارات جديدة</span>
+            <span className="notifications-counter-value">{unreadCount}</span>
+          </div>
+          {notificationsMeta && (
+            <div className="notifications-pagination">
+              <button
+                className="notifications-page-btn"
+                disabled={notificationsPage <= 1 || notificationsLoading}
+                onClick={() => setNotificationsPage((p) => Math.max(1, p - 1))}
+              >
+                السابق
+              </button>
+              <span className="notifications-page-info">
+                صفحة {notificationsMeta.current_page} من {notificationsMeta.last_page}
+              </span>
+              <button
+                className="notifications-page-btn"
+                disabled={notificationsMeta.current_page >= notificationsMeta.last_page || notificationsLoading}
+                onClick={() =>
+                  setNotificationsPage((p) =>
+                    notificationsMeta ? Math.min(notificationsMeta.last_page, p + 1) : p + 1,
+                  )
+                }
+              >
+                التالي
+              </button>
+            </div>
+          )}
+        </div>
         <div className="filter-bar">
           <span className="filter-label">فلتر بالتاريخ:</span>
           <div className="filter-group">
             <label className="filter-label">من</label>
             <DateInput
               value={dateFilter.start}
-              onChange={(v) => { setDateFilter({ ...dateFilter, start: v }); setCurrentPage(1); }}
+              onChange={(v) => { setDateFilter({ ...dateFilter, start: v }); }}
             />
           </div>
           <div className="filter-group">
             <label className="filter-label">إلى</label>
             <DateInput
               value={dateFilter.end}
-              onChange={(v) => { setDateFilter({ ...dateFilter, end: v }); setCurrentPage(1); }}
+              onChange={(v) => { setDateFilter({ ...dateFilter, end: v }); }}
             />
           </div>
           {/* <button
@@ -361,159 +452,69 @@ export default function NotificationsPage() {
           </button> */}
         </div>
         <div className="notifications-list">
-          {paginatedAdRequests.length === 0 && (
+          {notificationsLoading && (
+            <div className="empty-state">
+              <div className="empty-icon">⏳</div>
+              <h3>جاري تحميل الإشعارات</h3>
+              <p>يتم الآن جلب أحدث إشعارات النظام</p>
+            </div>
+          )}
+          {notificationsError && !notificationsLoading && (
+            <div className="empty-state">
+              <div className="empty-icon">⚠️</div>
+              <h3>تعذر جلب الإشعارات</h3>
+              <p>{notificationsError}</p>
+            </div>
+          )}
+          {!notificationsLoading && !notificationsError && filteredAdminNotifications.length === 0 && (
             <div className="empty-state">
               <div className="empty-icon">🔔</div>
               <h3>لا توجد إشعارات</h3>
-              <p>لا توجد إشعارات حسب الفلتر المحدد</p>
+              <p>لم يتم استلام أي إشعارات حتى الآن</p>
             </div>
           )}
-          {paginatedAdRequests.map((ad) => (
-            <div key={ad.id} className="notification-card" onClick={() => handleViewAdDetails(ad)}>
-              <div className="notification-header">
-                <h4 className="notification-title">{ad.title}</h4>
-                {/* <span className={`status-badge ${ad.status}`}>{ad.status === 'pending' ? 'قيد المراجعة' : ad.status === 'approved' ? 'تمت الموافقة' : 'مرفوض'}</span> */}
+          {filteredAdminNotifications.map((n) => {
+            const isRead = !!n.read_at;
+            const createdAt = n.created_at || n.updated_at || '';
+            const marking = Boolean(markingReadById[n.id]);
+            return (
+              <div
+                key={n.id}
+                className={`notification-card ${isRead ? 'notification-read' : 'notification-unread'}`}
+                onClick={() => {
+                  if (!isRead) handleMarkRead(n.id);
+                }}
+              >
+                <div className="notification-header">
+                  <h4 className="notification-title">{n.title}</h4>
+                  <div className="notification-actions">
+                    {!isRead && (
+                      <button
+                        type="button"
+                        className="notification-mark-read-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleMarkRead(n.id);
+                        }}
+                        disabled={marking}
+                      >
+                        {marking ? 'جارٍ...' : 'تعليم كمقروء'}
+                      </button>
+                    )}
+                    <span className={`notification-type-badge notification-type-${n.type || 'default'}`}>
+                      {getAdminNotificationTypeLabel(n.type)}
+                    </span>
+                  </div>
+                </div>
+                <p className="notification-description">{n.body}</p>
+                <div className="notification-time">
+                  تم الإرسال: {createdAt ? formatDate(createdAt) : '-'}
+                </div>
               </div>
-              <div className="notification-meta">
-                <span className="meta-item">- {ad.advertiser}</span>
-                {/* <span className="meta-sep">•</span> */}
-                <span className="meta-item">- {ad.category}</span>
-                {/* <span className="meta-sep">•</span> */}
-                <span className="meta-item">- {ad.location}</span>
-                {/* <span className="meta-sep">•</span> */}
-                <span className="meta-item">- {formatPrice(ad.price)}</span>
-              </div>
-              <p className="notification-description">{ad.description.length > 100 ? `${ad.description.substring(0, 100)}...` : ad.description}</p>
-              <div className="notification-time">تم التقديم: {formatDate(ad.submittedAt)}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-
-        {filteredAdRequests.length > 0 && (
-          <div className="pagination-container">
-            <div className="pagination-info">صفحة {currentPage} من {totalPages}</div>
-            <div className="pagination-controls">
-              <button
-                className="pagination-btn pagination-nav-btn"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                السابق
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                <button
-                  key={page}
-                  className={`pagination-btn ${page === currentPage ? 'active' : ''}`}
-                  onClick={() => setCurrentPage(page)}
-                >
-                  {page}
-                </button>
-              ))}
-              <button
-                className="pagination-btn pagination-nav-btn"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                التالي
-              </button>
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* Quick Replies Section */}
-      {/* <div className="quick-replies-section">
-        <div className="section-header">
-          <h3>الردود السريعة</h3>
-          <button 
-            className="btn-submit"
-            onClick={() => setShowQuickReplyModal(true)}
-          >
-            إضافة رد سريع
-          </button>
-        </div>
-        
-        <div className="quick-replies-grid">
-          {quickReplies.map((reply) => (
-            <div key={reply.id} className="quick-reply-card">
-              <div className="card-header">
-                <h4>{reply.title}</h4>
-                <span className="category-badge">{reply.category}</span>
-              </div>
-              <div className="card-body">
-                <p>{reply.content}</p>
-              </div>
-              <div className="card-actions">
-                <div className="action-buttons">
-                  <button className="btn-action copy" onClick={() => handleCopyQuickReply(reply)}>نسخ</button>
-                  <button className="btn-action edit" onClick={() => handleEditQuickReply(reply)}>تعديل</button>
-                  <button 
-                    className="btn-action delete"
-                    onClick={() => handleDeleteQuickReply(reply.id)}
-                  >
-                    حذف
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div> */}
-
-      {/* Ad Details Modal */}
-      {showAdDetails && selectedAdRequest && (
-        <div className="modal-overlay" onClick={() => setShowAdDetails(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>تفاصيل طلب الإعلان</h3>
-              <button className="modal-close" onClick={() => setShowAdDetails(false)}>×</button>
-            </div>
-            <div className="modal-body" style={{ padding: 24 }}>
-              <div style={{ marginBottom: '20px' }}>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '1.2rem', fontWeight: '600' }}>{selectedAdRequest.title}</h4>
-              </div>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-                <div>
-                  <strong>المعلن:</strong> {selectedAdRequest.advertiser}
-                </div>
-                <div>
-                  <strong>الفئة:</strong> {selectedAdRequest.category}
-                </div>
-                <div>
-                  <strong>الموقع:</strong> {selectedAdRequest.location}
-                </div>
-                <div>
-                  <strong>السعر:</strong> {formatPrice(selectedAdRequest.price)}
-                </div>
-                {selectedAdRequest.phone && (
-                  <div>
-                    <strong>الهاتف:</strong> {selectedAdRequest.phone}
-                  </div>
-                )}
-                {selectedAdRequest.email && (
-                  <div>
-                    <strong>البريد الإلكتروني:</strong> {selectedAdRequest.email}
-                  </div>
-                )}
-              </div>
-              
-              <div style={{ marginBottom: '20px' }}>
-                <strong>الوصف:</strong>
-                <p style={{ margin: '8px 0 0 0', lineHeight: '1.6', color: '#4b5563' }}>{selectedAdRequest.description}</p>
-              </div>
-              
-              <div style={{ marginBottom: '24px' }}>
-                <strong>تاريخ التقديم:</strong> {formatDate(selectedAdRequest.submittedAt)}
-              </div>
-              
-              <div className="form-actions">
-                <button className="btn-cancel" onClick={() => setShowAdDetails(false)}>إغلاق</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Quick Reply Modal */}
       {/* {showQuickReplyModal && (

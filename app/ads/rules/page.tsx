@@ -7,7 +7,6 @@ import { CategoryPlanPrice, CategoryPlanPriceUpdateItem } from "../../../models/
 
 const initialRules = {
   free_ads_count: 0,
-  free_ads_max_price: 0,
 };
 
 export default function DisplayRules() {
@@ -22,10 +21,8 @@ export default function DisplayRules() {
     fetchSystemSettings()
       .then((res) => {
         const count = (res?.data?.free_ads_count ?? (res as unknown as { free_ads_count?: number }).free_ads_count ?? 0);
-        const price = (res?.data?.free_ads_max_price ?? (res as unknown as { free_ads_max_price?: number }).free_ads_max_price ?? 0);
         setRules({
           free_ads_count: Number(count) || 0,
-          free_ads_max_price: Number(price) || 0,
         });
       })
       .catch((err) => {
@@ -53,6 +50,7 @@ export default function DisplayRules() {
         standard_ad_price: Number(rule.standard_ad_price) || 0,
         standard_days: Number(rule.standard_days) || 0,
         standard_ads_count: Number(rule.standard_ads_count) || 0,
+        free_ad_max_price: Number(rule.free_ad_max_price) || 0,
       }));
 
       await updateCategoryPlanPrices({ items });
@@ -81,7 +79,6 @@ export default function DisplayRules() {
     try {
       await updateSystemSettings({
         free_ads_count: Number(rules.free_ads_count) || 0,
-        free_ads_max_price: Number(rules.free_ads_max_price) || 0,
       });
       setSavedMessage("تم حفظ قواعد الأقسام بنجاح ✅");
       setTimeout(() => setSavedMessage(""), 3000);
@@ -123,7 +120,7 @@ export default function DisplayRules() {
             <div className="card-icon">$</div>
             <div>
               <h3 className="card-title">قواعد للأقسام</h3>
-              <p className="card-description">تحديد عدد الإعلانات المجانية، مدة الأيام، وقيمة الموافقة التلقائية لكل قسم</p>
+              <p className="card-description">تحديد عدد الإعلانات المجانية لكل قسم</p>
             </div>
             <div className="card-controls">
               <button
@@ -160,24 +157,7 @@ export default function DisplayRules() {
                   />
                 </div>
               </div>
-              <div className="input-group">
-                <label className="input-label">
-                  <span className="label-icon">📝</span>
-قيمة الموافقة التلقائية                </label>
-                <div className="input-wrapper">
-                  <input
-                    type="number"
-                    value={rules.free_ads_max_price}
-                    onChange={(e) => setRules({
-                      ...rules,
-                      free_ads_max_price: parseInt(e.target.value) || 0,
-                    })}
-                    disabled={!isEditingSection}
-                    className={`form-input ${isEditingSection ? 'editable' : 'readonly'}`}
-                  />
-                  <div className="input-suffix">ج.م</div>
-                </div>
-              </div>
+              
             </div>
           </div>
         </div>
@@ -215,11 +195,9 @@ export default function DisplayRules() {
                 <thead>
                   <tr>
                     <th>القسم</th>
-                    <th> الباقة المميزة
-</th>
-                    {/* <th>مدة الأيام</th> */}
-                    <th> الباقة ستاندر
-</th>
+                    <th>الباقة المميزة</th>
+                    <th>الباقة ستاندر</th>
+                    <th>الباقه المجانيه</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -277,27 +255,27 @@ export default function DisplayRules() {
                                 className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
                               />
                             </div>
-                            <div className="pricing-item">
-                              <div className="pricing-label">عدد الأيام</div>
-                              <input
-                                type="number"
-                                min={0}
-                                value={category.featured_days}
-                                onChange={(e) => {
-                                  const v = parseInt(e.target.value) || 0;
-                                  const updated = [...categoryRules];
-                                  updated[index] = { ...updated[index], featured_days: v };
-                                  setCategoryRules(updated);
-                                }}
-                                disabled={!isEditing}
-                                className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
-                              />
-                            </div>
+                          <div className="pricing-item">
+                            <div className="pricing-label">عدد الأيام</div>
+                            <input
+                              type="number"
+                              min={0}
+                              value={category.featured_days}
+                              onChange={(e) => {
+                                const v = parseInt(e.target.value) || 0;
+                                const updated = [...categoryRules];
+                                updated[index] = { ...updated[index], featured_days: v };
+                                setCategoryRules(updated);
+                              }}
+                              disabled={!isEditing}
+                              className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
+                            />
                           </div>
                         </div>
-                      </td>
-                      <td>
-                        <div className="pricing-stack">
+                      </div>
+                    </td>
+                    <td>
+                      <div className="pricing-stack">
                           <div className="pricing-item">
                             <div className="pricing-label">سعر الباقة</div>
                             <input
@@ -347,25 +325,46 @@ export default function DisplayRules() {
                                 className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
                               />
                             </div>
-                            <div className="pricing-item">
-                              <div className="pricing-label">عدد الأيام</div>
-                              <input
-                                type="number"
-                                min={0}
-                                value={category.standard_days}
-                                onChange={(e) => {
-                                  const v = parseInt(e.target.value) || 0;
-                                  const updated = [...categoryRules];
-                                  updated[index] = { ...updated[index], standard_days: v };
-                                  setCategoryRules(updated);
-                                }}
-                                disabled={!isEditing}
-                                className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
-                              />
-                            </div>
+                          <div className="pricing-item">
+                            <div className="pricing-label">عدد الأيام</div>
+                            <input
+                              type="number"
+                              min={0}
+                              value={category.standard_days}
+                              onChange={(e) => {
+                                const v = parseInt(e.target.value) || 0;
+                                const updated = [...categoryRules];
+                                updated[index] = { ...updated[index], standard_days: v };
+                                setCategoryRules(updated);
+                              }}
+                              disabled={!isEditing}
+                              className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
+                            />
                           </div>
                         </div>
-                      </td>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="pricing-stack">
+                        <div className="pricing-item">
+                          <div className="pricing-label">أقصى سعر للإعلان المجاني</div>
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="0 = غير محدود"
+                            value={category.free_ad_max_price ?? 0}
+                            onChange={(e) => {
+                              const v = Number(e.target.value) || 0;
+                              const updated = [...categoryRules];
+                              updated[index] = { ...updated[index], free_ad_max_price: v };
+                              setCategoryRules(updated);
+                            }}
+                            disabled={!isEditing}
+                            className={`form-input ${isEditing ? 'editable' : 'readonly'}`}
+                          />
+                        </div>
+                      </div>
+                    </td>
                     </tr>
                   ))}
                 </tbody>

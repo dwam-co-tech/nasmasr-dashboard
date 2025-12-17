@@ -12,6 +12,9 @@ export interface SystemSettingsPayload {
   featured_users_count?: number;
   free_ads_count?: number;
   free_ads_max_price?: number;
+  jobs_default_image?: string;
+  doctors_default_image?: string;
+  teachers_default_image?: string;
 }
 
 export interface SystemSettingsData {
@@ -28,6 +31,9 @@ export interface SystemSettingsData {
   featured_users_count: number;
   free_ads_count?: number;
   free_ads_max_price?: number;
+  jobs_default_image?: string;
+  doctors_default_image?: string;
+  teachers_default_image?: string;
 }
 
 export interface SystemSettingsResponse {

@@ -189,6 +189,15 @@ export interface AdminSubSectionsResponse {
   sub_sections: AdminSubSectionRecord[];
 }
 
+export interface AdminMainSectionsListResponse {
+  category?: {
+    id: number;
+    slug?: string;
+    name: string;
+  };
+  main_sections: AdminMainSectionRecord[];
+}
+
 export interface AdminCategoryListItem {
   id: number;
   slug?: string;

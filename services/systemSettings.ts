@@ -32,3 +32,57 @@ export async function updateSystemSettings(payload: SystemSettingsPayload, token
   }
   return data;
 }
+
+export async function updateSystemSettingsImage(key: string, file: File, token?: string): Promise<SystemSettingsResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  
+  const formData = new FormData();
+  formData.append('key', key);
+  formData.append('image', file);
+
+  const res = await fetch('https://api.nasmasr.app/api/admin/system-settings', {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as SystemSettingsResponse | null;
+
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر تحديث صورة القسم';
+    throw new Error(message);
+  }
+  return data;
+}
+
+export async function updatePublicSystemSettingsImage(key: string, file: File, token?: string): Promise<SystemSettingsResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+
+  const formData = new FormData();
+  formData.append('key', key);
+  formData.append('image', file);
+  formData.append('_method', 'PUT');
+
+  const res = await fetch('https://api.nasmasr.app/api/admin/system-settings/upload-image', {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as SystemSettingsResponse | null;
+
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر تحديث إعدادات النظام';
+    throw new Error(message);
+  }
+
+  return data;
+}

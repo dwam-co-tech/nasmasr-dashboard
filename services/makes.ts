@@ -240,6 +240,18 @@ export async function fetchCategoryMainSubs(slug: CategorySlug | string, token?:
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (t) headers.Authorization = `Bearer ${t}`;
+  try {
+    const list = await fetchAdminMainSections(slug, token);
+    if (Array.isArray(list) && list.length > 0) {
+      const out: Record<string, string[]> = {};
+      for (const it of list) {
+        const mainName = normalizeString(it.name);
+        const subs = Array.isArray(it.sub_sections) ? it.sub_sections.map(s => normalizeString(s.name) ?? '').filter(Boolean) : [];
+        if (mainName) out[mainName] = subs;
+      }
+      if (Object.keys(out).length) return out;
+    }
+  } catch {}
   const urlAdmin = `https://api.nasmasr.app/api/category-fields?category_slug=${encodeURIComponent(String(slug))}`;
   const urlOld = `https://api.nasmasr.app/api/category-fields?category_slug=${encodeURIComponent(String(slug))}`;
   const urlNew = `https://api.nasmasr.app/api/category-fields?category_slug=${encodeURIComponent(String(slug))}`;
@@ -648,12 +660,20 @@ export function buildAdminSubSectionUrl(mainSectionId: number | string): string 
   return `https://api.nasmasr.app/api/admin/sub-section/${mainSectionId}`;
 }
 
+export function buildPublicSubSectionsUrl(mainSectionId: number | string): string {
+  return `https://api.nasmasr.app/api/sub-sections/${mainSectionId}`;
+}
+
 export function buildAdminMainSectionIdUrl(mainSectionId: number | string): string {
   return `https://api.nasmasr.app/api/admin/main-section/${mainSectionId}`;
 }
 
 export function buildAdminSubSectionIdUrl(subSectionId: number | string): string {
   return `https://api.nasmasr.app/api/admin/sub-section/${subSectionId}`;
+}
+
+export function buildAdminCategoryImageUrl(categoryId: number | string): string {
+  return `https://api.nasmasr.app/api/admin/categories/${categoryId}/image`;
 }
 
 export async function postAdminMainSection(slug: CategorySlug | string, name: string, token?: string): Promise<AdminMainSectionRecord> {
@@ -745,7 +765,50 @@ export async function fetchAdminSubSections(mainSectionId: number | string, toke
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (t) headers.Authorization = `Bearer ${t}`;
-  const url = buildAdminSubSectionUrl(mainSectionId);
+  let url = buildAdminSubSectionUrl(mainSectionId);
+  let res = await fetch(url, { method: 'GET', headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw) {
+    url = buildPublicSubSectionsUrl(mainSectionId);
+    res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  if (!res.ok || !raw) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر جلب الفرعيات';
+    throw new Error(message);
+  }
+  const out: AdminSubSectionRecord[] = [];
+  const pushParsed = (it: unknown) => {
+    if (it && typeof it === 'object') {
+      const o = it as Record<string, unknown>;
+      const id = typeof o['id'] === 'number' ? (o['id'] as number) : 0;
+      const category_id = typeof o['category_id'] === 'number' ? (o['category_id'] as number) : 0;
+      const main_section_id = typeof o['main_section_id'] === 'number' ? (o['main_section_id'] as number) : (typeof mainSectionId === 'number' ? mainSectionId : 0);
+      const name = normalizeString(o['name']) ?? '';
+      const sort_order = typeof o['sort_order'] === 'number' ? (o['sort_order'] as number) : undefined;
+      const is_active = typeof o['is_active'] === 'boolean' ? (o['is_active'] as boolean) : undefined;
+      const created_at = typeof o['created_at'] === 'string' ? (o['created_at'] as string) : undefined;
+      const updated_at = typeof o['updated_at'] === 'string' ? (o['updated_at'] as string) : undefined;
+      if (name) out.push({ id, category_id, main_section_id, name, sort_order, is_active, created_at, updated_at });
+    }
+  };
+  if (Array.isArray(raw)) {
+    for (const it of raw) pushParsed(it);
+  } else if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const arr = obj['sub_sections'] ?? obj['data'];
+    if (Array.isArray(arr)) {
+      for (const it of arr) pushParsed(it);
+    } else {
+      pushParsed(raw);
+    }
+  }
+  return out;
+}
+
+export async function fetchPublicSubSections(mainSectionId: number | string): Promise<AdminSubSectionRecord[]> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const url = buildPublicSubSectionsUrl(mainSectionId);
   const res = await fetch(url, { method: 'GET', headers });
   const raw = (await res.json().catch(() => null)) as unknown;
   if (!res.ok || !raw) {
@@ -1050,6 +1113,65 @@ export async function updateAdminCategoryActive(categoryId: number | string, is_
   return { id, slug, name, icon, is_active: is_active_out, sort_order, homepage_image, cards_count } as AdminCategoryListItem;
 }
 
+export async function updateAdminCategoryImage(categoryId: number | string, file: File, token?: string): Promise<AdminCategoryListItem> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const fd = new FormData();
+  fd.append('image', file);
+  const url = buildAdminCategoryImageUrl(categoryId);
+  const res = await fetch(url, { method: 'PUT', headers, body: fd });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== 'object') {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر رفع الصورة';
+    throw new Error(message);
+  }
+  const obj = raw as Record<string, unknown>;
+  const data = (obj['data'] ?? obj) as Record<string, unknown>;
+  const id = typeof data['id'] === 'number' ? (data['id'] as number) : (typeof categoryId === 'number' ? Number(categoryId) : 0);
+  const slugVal = data['slug'] ?? data['category_slug'];
+  const slug = typeof slugVal === 'string' ? String(slugVal).trim() : undefined;
+  const nameRaw = data['name'] ?? data['display_name'] ?? data['name_ar'];
+  const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
+  const iconRaw = data['icon'] ?? data['emoji'];
+  const icon = typeof iconRaw === 'string' ? String(iconRaw).trim() : undefined;
+  const sort_order = typeof data['sort_order'] === 'number' ? (data['sort_order'] as number) : (typeof data['order'] === 'number' ? (data['order'] as number) : undefined);
+  const is_active_out = typeof data['is_active'] === 'boolean' ? (data['is_active'] as boolean) : undefined;
+  const imageRaw = data['homepage_image'] ?? data['image'] ?? data['image_url'] ?? data['icon_url'];
+  const homepage_image = typeof imageRaw === 'string' ? String(imageRaw).trim() : undefined;
+  const cards_count = typeof data['cards_count'] === 'number' ? (data['cards_count'] as number) : undefined;
+  return { id, slug, name, icon, is_active: is_active_out, sort_order, homepage_image, cards_count } as AdminCategoryListItem;
+}
+
+export async function deleteAdminCategoryImage(categoryId: number | string, token?: string): Promise<AdminCategoryListItem> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = buildAdminCategoryImageUrl(categoryId);
+  const res = await fetch(url, { method: 'DELETE', headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== 'object') {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = err?.error || err?.message || 'تعذر حذف الصورة';
+    throw new Error(message);
+  }
+  const obj = raw as Record<string, unknown>;
+  const data = (obj['data'] ?? obj) as Record<string, unknown>;
+  const id = typeof data['id'] === 'number' ? (data['id'] as number) : (typeof categoryId === 'number' ? Number(categoryId) : 0);
+  const slugVal = data['slug'] ?? data['category_slug'];
+  const slug = typeof slugVal === 'string' ? String(slugVal).trim() : undefined;
+  const nameRaw = data['name'] ?? data['display_name'] ?? data['name_ar'];
+  const name = typeof nameRaw === 'string' || typeof nameRaw === 'number' ? String(nameRaw).trim() : '';
+  const iconRaw = data['icon'] ?? data['emoji'];
+  const icon = typeof iconRaw === 'string' ? String(iconRaw).trim() : undefined;
+  const sort_order = typeof data['sort_order'] === 'number' ? (data['sort_order'] as number) : (typeof data['order'] === 'number' ? (data['order'] as number) : undefined);
+  const is_active_out = typeof data['is_active'] === 'boolean' ? (data['is_active'] as boolean) : undefined;
+  const imageRaw = data['homepage_image'] ?? data['image'] ?? data['image_url'] ?? data['icon_url'];
+  const homepage_image = typeof imageRaw === 'string' ? String(imageRaw).trim() : undefined;
+  const cards_count = typeof data['cards_count'] === 'number' ? (data['cards_count'] as number) : undefined;
+  return { id, slug, name, icon, is_active: is_active_out, sort_order, homepage_image, cards_count } as AdminCategoryListItem;
+}
 export async function updateAdminMainSection(mainSectionId: number, name: string, token?: string): Promise<AdminMainSectionRecord> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };

@@ -10,6 +10,7 @@ export interface CategoryPlanPrice {
   standard_ad_price: number;
   standard_days: number;
   standard_ads_count: number;
+  free_ad_max_price: number;
 }
 
 export interface CategoryPlanPriceUpdateItem {
@@ -22,6 +23,7 @@ export interface CategoryPlanPriceUpdateItem {
   standard_ad_price: number;
   standard_days: number;
   standard_ads_count: number;
+  free_ad_max_price: number;
 }
 
 export interface CategoryPlanPriceUpdateRequest {
