@@ -14,6 +14,7 @@ export interface UserSummary {
   registered_at: string;
   listings_count: number;
   role: string;
+  phone_verified: boolean;
 }
 
 export interface UsersSummaryResponse {

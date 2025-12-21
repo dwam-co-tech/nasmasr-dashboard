@@ -55,18 +55,18 @@ export default function SettingsPage() {
       phone: ''
     },
     supportNumbers: {
-      primary: '',
-      secondary: '',
-      emergency: ''
+      support: '',
+      passwordChange: '',
+      inquiries: ''
     },
-    
+
     // Interface Settings
     showPhoneNumbers: false,
     advertisersCount: 0,
     adsPerSection: 8,
     sectionsOrder: ['featured', 'recent', 'popular'],
     sideBanners: true,
-    
+
     // Security Settings
     passwordRequirements: {
       minLength: 8,
@@ -81,12 +81,12 @@ export default function SettingsPage() {
     },
     twoFactorAuth: false,
     sessionDuration: 24, // hours
-    
+
     // Communications Settings
     smsProvider: 'default',
     emailProvider: 'default',
     pushNotifications: true,
-    
+
     // Integrations Settings
     apiKeys: {
       sms: '',
@@ -108,50 +108,54 @@ export default function SettingsPage() {
         const draft = JSON.parse(raw);
         if (draft && typeof draft === 'object') setSettings(draft);
       }
-    } catch {}
+    } catch { }
   }, []);
 
   useEffect(() => {
     const loadSettings = async () => {
       try {
         const resp = await fetchSystemSettings();
-        const d = resp?.data;
+        // Handle response structure where data might be root or in .data
+        const d: any = (resp as any).data || resp;
         if (!d) return;
+
         setSettings((prev) => ({
           ...prev,
-          privacyPolicy: prev.privacyPolicy || d.privacy_policy || '',
-          termsOfService: prev.termsOfService || (d as { ['terms_conditions-main_']?: string })['terms_conditions-main_'] || '',
+          privacyPolicy: prev?.privacyPolicy || d.privacy_policy || '',
+          termsOfService: prev?.termsOfService || d['terms_conditions-main_'] || '',
           contactLinks: {
-            facebook: prev.contactLinks.facebook || d.facebook || '',
-            twitter: prev.contactLinks.twitter || d.twitter || '',
-            instagram: prev.contactLinks.instagram || d.instagram || '',
-            whatsapp: prev.contactLinks.whatsapp || '',
-            email: prev.contactLinks.email || d.email || '',
-            phone: prev.contactLinks.phone || '',
+            facebook: prev?.contactLinks?.facebook || d.facebook || '',
+            twitter: prev?.contactLinks?.twitter || d.twitter || '',
+            instagram: prev?.contactLinks?.instagram || d.instagram || '',
+            whatsapp: prev?.contactLinks?.whatsapp || '',
+            email: prev?.contactLinks?.email || d.email || '',
+            phone: prev?.contactLinks?.phone || '',
           },
           supportNumbers: {
-            primary: prev.supportNumbers.primary || d.support_number || '',
-            secondary: prev.supportNumbers.secondary || d.sub_support_number || '',
-            emergency: prev.supportNumbers.emergency || d.emergency_number || '',
+            support: prev?.supportNumbers?.support || d.support_number || '',
+            passwordChange: prev?.supportNumbers?.passwordChange || d.sub_support_number || '',
+            inquiries: prev?.supportNumbers?.inquiries || d.emergency_number || '',
           },
-          showPhoneNumbers: typeof prev.showPhoneNumbers === 'boolean' ? prev.showPhoneNumbers : Boolean(d.show_phone),
-          advertisersCount: typeof prev.advertisersCount === 'number' && prev.advertisersCount !== 0
+          showPhoneNumbers: typeof prev?.showPhoneNumbers === 'boolean' ? prev.showPhoneNumbers : Boolean(d.show_phone),
+          advertisersCount: typeof prev?.advertisersCount === 'number' && prev.advertisersCount !== 0
             ? prev.advertisersCount
-            : (typeof d.featured_users_count === 'number' ? d.featured_users_count : prev.advertisersCount),
-          adsPerSection: prev.adsPerSection,
-          sectionsOrder: prev.sectionsOrder,
-          sideBanners: prev.sideBanners,
-          passwordRequirements: prev.passwordRequirements,
-          pinSettings: prev.pinSettings,
-          twoFactorAuth: prev.twoFactorAuth,
-          sessionDuration: prev.sessionDuration,
-          smsProvider: prev.smsProvider,
-          emailProvider: prev.emailProvider,
-          pushNotifications: prev.pushNotifications,
-          apiKeys: prev.apiKeys,
-          webhooks: prev.webhooks,
+            : (typeof d.featured_users_count === 'number' ? d.featured_users_count : (prev?.advertisersCount || 0)),
+          adsPerSection: prev?.adsPerSection || 8,
+          sectionsOrder: prev?.sectionsOrder || ['featured', 'recent', 'popular'],
+          sideBanners: typeof prev?.sideBanners === 'boolean' ? prev.sideBanners : true,
+          passwordRequirements: prev?.passwordRequirements || { minLength: 8, requireUppercase: true, requireLowercase: true, requireNumbers: true, requireSpecialChars: true },
+          pinSettings: prev?.pinSettings || { numericOnly: true, length: 6 },
+          twoFactorAuth: prev?.twoFactorAuth || false,
+          sessionDuration: prev?.sessionDuration || 24,
+          smsProvider: prev?.smsProvider || 'default',
+          emailProvider: prev?.emailProvider || 'default',
+          pushNotifications: typeof prev?.pushNotifications === 'boolean' ? prev.pushNotifications : true,
+          apiKeys: prev?.apiKeys || { sms: '', email: '', push: '', analytics: '' },
+          webhooks: prev?.webhooks || { userRegistration: '', adApproval: '', paymentSuccess: '' },
         }));
-      } catch {}
+      } catch (e) {
+        console.error("Failed to load settings", e);
+      }
     };
     loadSettings();
   }, []);
@@ -159,7 +163,7 @@ export default function SettingsPage() {
   useEffect(() => {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(settings));
-    } catch {}
+    } catch { }
   }, [settings]);
 
   const handleInputChange = (section: string, field: string, value: string | number | boolean) => {
@@ -174,9 +178,9 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     const payload = {
-      support_number: settings.supportNumbers.primary,
-      sub_support_number: settings.supportNumbers.secondary,
-      emergency_number: settings.supportNumbers.emergency,
+      support_number: settings.supportNumbers.support,
+      sub_support_number: settings.supportNumbers.passwordChange,
+      emergency_number: settings.supportNumbers.inquiries,
       privacy_policy: settings.privacyPolicy,
       'terms_conditions-main_': settings.termsOfService,
       facebook: settings.contactLinks.facebook,
@@ -209,7 +213,7 @@ export default function SettingsPage() {
   const renderGeneralSettings = () => (
     <div className="settings-section">
       <h3 className="section-title">الإعدادات العامة</h3>
-      
+
       <div className="settings-group">
         <h4 className="group-title">سياسات الخصوصية والشروط</h4>
         <div className="form-group">
@@ -312,35 +316,35 @@ export default function SettingsPage() {
         <h4 className="group-title">أرقام الدعم</h4>
         <div className="form-grid">
           <div className="form-group">
-            <label htmlFor="primarySupport">الدعم الأساسي (واتساب) </label>
+            <label htmlFor="supportNumber">رقم الدعم (support_number)</label>
             <input
               type="tel"
-              id="primarySupport"
+              id="supportNumber"
               className="form-input"
-              value={settings.supportNumbers.primary}
-              onChange={(e) => handleInputChange('supportNumbers', 'primary', e.target.value)}
+              value={settings.supportNumbers.support}
+              onChange={(e) => handleInputChange('supportNumbers', 'support', e.target.value)}
               placeholder="+20 1XX XXX XXXX"
             />
           </div>
           <div className="form-group">
-            <label htmlFor="secondarySupport">الدعم الثانوي</label>
+            <label htmlFor="passwordChangeNumber">رقم تغيير الباسورد (sub_support_number)</label>
             <input
               type="tel"
-              id="secondarySupport"
+              id="passwordChangeNumber"
               className="form-input"
-              value={settings.supportNumbers.secondary}
-              onChange={(e) => handleInputChange('supportNumbers', 'secondary', e.target.value)}
+              value={settings.supportNumbers.passwordChange}
+              onChange={(e) => handleInputChange('supportNumbers', 'passwordChange', e.target.value)}
               placeholder="+20 1XX XXX XXXX"
             />
           </div>
           <div className="form-group">
-            <label htmlFor="emergencySupport">الدعم الطارئ</label>
+            <label htmlFor="inquiriesNumber">رقم الاستفسارات (emergency_number)</label>
             <input
               type="tel"
-              id="emergencySupport"
+              id="inquiriesNumber"
               className="form-input"
-              value={settings.supportNumbers.emergency}
-              onChange={(e) => handleInputChange('supportNumbers', 'emergency', e.target.value)}
+              value={settings.supportNumbers.inquiries}
+              onChange={(e) => handleInputChange('supportNumbers', 'inquiries', e.target.value)}
               placeholder="+20 1XX XXX XXXX"
             />
           </div>
@@ -352,7 +356,7 @@ export default function SettingsPage() {
   const renderInterfaceSettings = () => (
     <div className="settings-section">
       <h3 className="section-title">إعدادات الواجهة</h3>
-      
+
       {/* <div className="settings-group">
         <h4 className="group-title">عرض أرقام الهواتف</h4>
         <div className="form-group">
@@ -407,7 +411,7 @@ export default function SettingsPage() {
             />
           </div>
         </div>
-        
+
         {/* <div className="form-group">
           <label className="toggle-label">
             <span className="toggle-text">تشغيل البانرات الجانبية</span>
@@ -432,7 +436,7 @@ export default function SettingsPage() {
   const renderSecuritySettings = () => (
     <div className="settings-section">
       <h3 className="section-title">إعدادات الأمان</h3>
-      
+
       <div className="settings-group">
         <h4 className="group-title">متطلبات كلمة المرور</h4>
         <div className="form-grid">
@@ -449,7 +453,7 @@ export default function SettingsPage() {
             />
           </div>
         </div>
-        
+
         <div className="checkbox-group">
           <label className="checkbox-label">
             <input
@@ -558,7 +562,7 @@ export default function SettingsPage() {
   const renderCommunicationsSettings = () => (
     <div className="settings-section">
       <h3 className="section-title">إعدادات الاتصالات</h3>
-      
+
       <div className="settings-group">
         <h4 className="group-title">مزودات الخدمة</h4>
         <div className="form-grid">
@@ -591,7 +595,7 @@ export default function SettingsPage() {
             </select>
           </div>
         </div>
-        
+
         <div className="form-group">
           <label className="toggle-label">
             <span className="toggle-text">تفعيل الإشعارات الفورية</span>
@@ -616,7 +620,7 @@ export default function SettingsPage() {
   const renderIntegrationsSettings = () => (
     <div className="settings-section">
       <h3 className="section-title">إعدادات التكاملات</h3>
-      
+
       <div className="settings-group">
         <h4 className="group-title">مفاتيح API</h4>
         <div className="form-group">
@@ -748,7 +752,7 @@ export default function SettingsPage() {
 
         <div className="settings-content">
           {renderTabContent()}
-          
+
           <div className="settings-actions">
             <button className="btn-save" onClick={handleSave}>
               <svg className="btn-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -778,7 +782,7 @@ export default function SettingsPage() {
                 {toast.type === 'info' && 'ℹ'}
               </span>
               <span className="toast-message">{toast.message}</span>
-              <button 
+              <button
                 onClick={() => removeToast(toast.id)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', opacity: 0.5 }}
               >

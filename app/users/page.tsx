@@ -131,7 +131,7 @@ export default function UsersPage() {
           adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
           role: u.role,
           lastLogin: u.registered_at,
-          phoneVerified: false,
+          phoneVerified: u.phone_verified,
         } as User));
         setUsers(mapped);
         setUsersMeta(resp.meta);
@@ -152,7 +152,7 @@ export default function UsersPage() {
         openPackagesModal(target);
         localStorage.removeItem('openPackagesForUserId');
       }
-    } catch {}
+    } catch { }
   }, [users]);
 
   useEffect(() => {
@@ -489,10 +489,10 @@ export default function UsersPage() {
   const filteredAds = selectedCategory === 'all'
     ? ads
     : ads.filter(
-        (ad) =>
-          ad.categorySlug === selectedCategory ||
-          ad.category === (CATEGORY_LABELS_AR[selectedCategory] ?? selectedCategory)
-      );
+      (ad) =>
+        ad.categorySlug === selectedCategory ||
+        ad.category === (CATEGORY_LABELS_AR[selectedCategory] ?? selectedCategory)
+    );
   const filteredUsers = users
     .filter((user) => {
       if (roleFilter === 'users') return user.role === 'user';
@@ -571,7 +571,7 @@ export default function UsersPage() {
           adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
           role: u.role,
           lastLogin: u.registered_at,
-          phoneVerified: false,
+          phoneVerified: u.phone_verified,
         } as User));
         const last = Math.max(1, Number(first.meta?.last_page || 1));
         if (last > 1) {
@@ -591,7 +591,7 @@ export default function UsersPage() {
               adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
               role: u.role,
               lastLogin: u.registered_at,
-              phoneVerified: false,
+              phoneVerified: u.phone_verified,
             } as User));
             aggregated = aggregated.concat(mapped);
           });
@@ -740,7 +740,7 @@ export default function UsersPage() {
         standard_active: Boolean(packagesForm.startStandardNow),
       };
       localStorage.setItem('userPackageData:' + id, JSON.stringify(payload));
-    } catch {}
+    } catch { }
   };
 
   const closePackagesModal = () => {
@@ -771,7 +771,7 @@ export default function UsersPage() {
       if (packagesForm.standardExpiryDate) payload.standard_expire_date = new Date(packagesForm.standardExpiryDate).toISOString();
       const resp = await assignUserPackage(payload);
       const d = resp.data;
-      try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch {}
+      try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch { }
       const updatedUser = {
         ...selectedUserForPackages,
         package: {
@@ -1016,7 +1016,7 @@ export default function UsersPage() {
   const getPageNumbers = () => {
     const pages = [];
     const maxVisiblePages = 5;
-    
+
     if (totalPages <= maxVisiblePages) {
       for (let i = 1; i <= totalPages; i++) {
         pages.push(i);
@@ -1024,22 +1024,22 @@ export default function UsersPage() {
     } else {
       const startPage = Math.max(1, currentPage - 2);
       const endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-      
+
       if (startPage > 1) {
         pages.push(1);
         if (startPage > 2) pages.push('...');
       }
-      
+
       for (let i = startPage; i <= endPage; i++) {
         pages.push(i);
       }
-      
+
       if (endPage < totalPages) {
         if (endPage < totalPages - 1) pages.push('...');
         pages.push(totalPages);
       }
     }
-    
+
     return pages;
   };
 
@@ -1079,7 +1079,7 @@ export default function UsersPage() {
       <div className="users-page">
         <div className="users-header">
           <div className="header-content">
-            <button 
+            <button
               className="back-btn"
               onClick={() => setShowUserProfile(false)}
             >
@@ -1092,13 +1092,13 @@ export default function UsersPage() {
 
         <div className="user-profile-container">
           <div className="profile-tabs">
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`}
               onClick={() => setActiveTab('data')}
             >
-              البيانات 
+              البيانات
             </button>
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'ads' ? 'active' : ''}`}
               onClick={() => setActiveTab('ads')}
             >
@@ -1140,28 +1140,28 @@ export default function UsersPage() {
                   )}
                 </div>
                 <div className="data-grid">
-              <div className="data-item">
-                <label>الاسم الكامل:</label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={editForm?.name ?? ''}
-                    onChange={(e) =>
-                      setEditForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
-                    }
-                    className="input"
-                  />
-                ) : (
-                  <span>
-                    {selectedUser.name}
-                    {selectedUser.phoneVerified && (
-                      <span className="verified-badge" title="موثّق" style={{ marginRight: 8 }}>
-                        ✓
+                  <div className="data-item">
+                    <label>الاسم الكامل:</label>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editForm?.name ?? ''}
+                        onChange={(e) =>
+                          setEditForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+                        }
+                        className="input"
+                      />
+                    ) : (
+                      <span>
+                        {selectedUser.name}
+                        {selectedUser.phoneVerified && (
+                          <span className="verified-badge" title="موثّق" style={{ marginRight: 8 }}>
+                            ✓
+                          </span>
+                        )}
                       </span>
                     )}
-                  </span>
-                )}
-              </div>
+                  </div>
                   <div className="data-item">
                     <label>رقم الهاتف:</label>
                     {isEditing ? (
@@ -1296,14 +1296,14 @@ export default function UsersPage() {
                     />
                   </div>
                 </div>
-                
+
                 <div className="ads-list">
                   {filteredAds.length > 0 ? (
                     filteredAds.map((ad) => (
                       <div key={ad.id} className="ad-item" onClick={() => openAdDetailsModal(ad)}>
                         <div className="ad-image">
-                          <Image 
-                            src={ad.image} 
+                          <Image
+                            src={ad.image}
                             alt={ad.title}
                             width={120}
                             height={90}
@@ -1639,8 +1639,8 @@ export default function UsersPage() {
                             handlePackagesChange('featuredExpiryDate', val);
                             if (packagesForm.startFeaturedNow) {
                               const dayMs = 24 * 60 * 60 * 1000;
-                              const now = new Date(); now.setHours(0,0,0,0);
-                              const exp = new Date(val); exp.setHours(0,0,0,0);
+                              const now = new Date(); now.setHours(0, 0, 0, 0);
+                              const exp = new Date(val); exp.setHours(0, 0, 0, 0);
                               const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
                               handlePackagesChange('featuredDays', days);
                             }
@@ -1712,8 +1712,8 @@ export default function UsersPage() {
                             handlePackagesChange('standardExpiryDate', val);
                             if (packagesForm.startStandardNow) {
                               const dayMs = 24 * 60 * 60 * 1000;
-                              const now = new Date(); now.setHours(0,0,0,0);
-                              const exp = new Date(val); exp.setHours(0,0,0,0);
+                              const now = new Date(); now.setHours(0, 0, 0, 0);
+                              const exp = new Date(val); exp.setHours(0, 0, 0, 0);
                               const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
                               handlePackagesChange('standardDays', days);
                             }
@@ -1767,14 +1767,14 @@ export default function UsersPage() {
                 <div className="code-display" title="اضغط للنسخ" onClick={copyVerificationCode}>{verificationCode}</div>
                 <button className="copy-icon" onClick={copyVerificationCode} title="نسخ الكود">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="9" y="9" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2"/>
-                    <rect x="4" y="4" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2"/>
+                    <rect x="9" y="9" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2" />
+                    <rect x="4" y="4" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2" />
                   </svg>
                 </button>
                 <button className="whatsapp-icon" onClick={() => openWhatsAppWithCode(userForVerify)} title="إرسال عبر واتساب">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>
-                    <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none"/>
+                    <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white" />
+                    <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none" />
                   </svg>
                 </button>
               </div>
@@ -1782,7 +1782,7 @@ export default function UsersPage() {
             </div>
             <div className="modal-footer">
               {/* <button className="btn-cancel" onClick={closeVerifyModal}>إغلاق</button> */}
-          {/*    <button className="btn-verify-done" onClick={() => { if (userForVerify) handleVerifyPhone(userForVerify.id); closeVerifyModal(); }}>تم التحقق</button>*/}
+              {/*    <button className="btn-verify-done" onClick={() => { if (userForVerify) handleVerifyPhone(userForVerify.id); closeVerifyModal(); }}>تم التحقق</button>*/}
             </div>
           </div>
         </div>
@@ -1996,13 +1996,13 @@ export default function UsersPage() {
                       >
                         {user.status === 'active' ? (
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2"/>
-                            <path d="m4.9 4.9 14.2 14.2" stroke="white" strokeWidth="2"/>
+                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2" />
+                            <path d="m4.9 4.9 14.2 14.2" stroke="white" strokeWidth="2" />
                           </svg>
                         ) : (
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2"/>
+                            <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2" />
                           </svg>
                         )}
                       </button>
@@ -2031,9 +2031,9 @@ export default function UsersPage() {
                         title="تغيير كلمة السر"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke="white" strokeWidth="2"/>
-                          <circle cx="12" cy="16" r="1" fill="white"/>
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="white" strokeWidth="2"/>
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke="white" strokeWidth="2" />
+                          <circle cx="12" cy="16" r="1" fill="white" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="white" strokeWidth="2" />
                         </svg>
                       </button>
                       <button
@@ -2042,8 +2042,8 @@ export default function UsersPage() {
                         title="عرض كود التحقق"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2"/>
-                          <path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2" />
+                          <path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       </button>
                       <button
@@ -2052,9 +2052,9 @@ export default function UsersPage() {
                         title="الباقات"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 7l9-4 9 4-9 4-9-4z" stroke="white" strokeWidth="2"/>
-                          <path d="M3 12l9 4 9-4" stroke="white" strokeWidth="2"/>
-                          <path d="M3 12v5l9 4 9-4v-5" stroke="white" strokeWidth="2"/>
+                          <path d="M3 7l9-4 9 4-9 4-9-4z" stroke="white" strokeWidth="2" />
+                          <path d="M3 12l9 4 9-4" stroke="white" strokeWidth="2" />
+                          <path d="M3 12v5l9 4 9-4v-5" stroke="white" strokeWidth="2" />
                         </svg>
                       </button>
                       {(String(user.role || '').toLowerCase().includes('advertiser') || String(user.role || '').includes('معلن')) && (
@@ -2064,7 +2064,7 @@ export default function UsersPage() {
                           title="المفضلة"
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="white"/>
+                            <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="white" />
                           </svg>
                         </button>
                       )}
@@ -2074,9 +2074,9 @@ export default function UsersPage() {
                         title="حذف المستخدم"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 6h18" stroke="white" strokeWidth="2"/>
-                          <path d="M8 6V4h8v2" stroke="white" strokeWidth="2"/>
-                          <path d="M6 6l1 14h10l1-14" stroke="white" strokeWidth="2"/>
+                          <path d="M3 6h18" stroke="white" strokeWidth="2" />
+                          <path d="M8 6V4h8v2" stroke="white" strokeWidth="2" />
+                          <path d="M6 6l1 14h10l1-14" stroke="white" strokeWidth="2" />
                         </svg>
                       </button>
                     </div>
@@ -2123,7 +2123,7 @@ export default function UsersPage() {
                   {user.status === 'active' ? 'نشط' : 'محظور'}
                 </span>
               </div>
-              
+
               <div className="card-body">
                 <div className="info-grid">
                   <div className="info-item">
@@ -2136,8 +2136,8 @@ export default function UsersPage() {
                         title="فتح واتساب"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>
-                          <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none"/>
+                          <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white" />
+                          <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none" />
                         </svg>
                       </button>
                     </span>
@@ -2156,7 +2156,7 @@ export default function UsersPage() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="card-actions">
                 <button
                   className="btn-view"
@@ -2234,30 +2234,29 @@ export default function UsersPage() {
             <div className="pagination-info">
               عرض {serverTotal} مستخدم في {totalPages} صفحة
             </div>
-            
+
             <div className="pagination">
-              <button 
+              <button
                 className="pagination-btn pagination-nav"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
               >
                 السابق
               </button>
-              
+
               {getPageNumbers().map((page, index) => (
                 <button
                   key={index}
-                  className={`pagination-btn ${
-                    page === currentPage ? 'active' : ''
-                  } ${page === '...' ? 'pagination-dots' : ''}`}
+                  className={`pagination-btn ${page === currentPage ? 'active' : ''
+                    } ${page === '...' ? 'pagination-dots' : ''}`}
                   onClick={() => typeof page === 'number' && goToPage(page)}
                   disabled={page === '...'}
                 >
                   {page}
                 </button>
               ))}
-              
-              <button 
+
+              <button
                 className="pagination-btn pagination-nav"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages}
