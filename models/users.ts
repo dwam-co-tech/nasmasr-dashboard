@@ -166,3 +166,20 @@ export interface DisableFeaturedResponse {
   success?: boolean;
   message?: string;
 }
+
+export interface DelegateClient {
+  id: number;
+  name: string | null;
+  phone: string;
+  address: string | null;
+  lat: string | null;
+  lng: string | null;
+  status: string;
+  role: string;
+}
+
+export interface DelegateClientsResponse {
+  success: boolean;
+  message: string;
+  data: DelegateClient[];
+}

@@ -3,52 +3,94 @@
 import { useState, useEffect, useMemo } from 'react';
 import DateInput from '@/components/DateInput';
 import {
-  fetchRevenueSummary,
   fetchTransactions,
-  fetchAdsByCategory,
-  fetchAdsByPlan,
 } from '@/services/dashboardReports';
 import type {
-  FinancialRevenueResponse,
   TransactionsResponse,
-  AdsByCategoryResponse,
-  AdsByPlanResponse,
+  TransactionAdItem,
+  TransactionSubscriptionItem,
 } from '@/models/dashboardReports';
 
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-  Cell,
   PieChart,
   Pie,
-  Legend
+  Cell,
 } from 'recharts';
+
+// Lucide React Icons
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  CreditCard,
+  Users,
+  Calendar,
+  Search,
+  FileText,
+  Package,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  BarChart3,
+  PieChart as PieChartIcon,
+  Wallet,
+  Receipt,
+  CalendarDays,
+  CalendarRange,
+  CalendarClock,
+  Settings2,
+  Filter,
+  Megaphone,
+  Briefcase,
+} from 'lucide-react';
 
 // ==================== Helper Components ====================
 
 function DonutChart({
   data,
   title,
+  icon,
   centerValue,
   centerLabel
 }: {
   data: { name: string; value: number; color: string }[];
   title: string;
+  icon: React.ReactNode;
   centerValue: string;
   centerLabel: string;
 }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
 
+  if (total === 0) {
+    return (
+      <div className="reports-donut-card">
+        <h3 className="reports-chart-title">
+          <span className="reports-chart-icon">{icon}</span>
+          {title}
+        </h3>
+        <div className="reports-chart-empty" style={{ height: 220 }}>
+          <PieChartIcon size={48} strokeWidth={1} />
+          <p>لا توجد بيانات</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="reports-donut-card">
-      <h3 className="reports-chart-title">{title}</h3>
+      <h3 className="reports-chart-title">
+        <span className="reports-chart-icon">{icon}</span>
+        {title}
+      </h3>
       <div className="reports-donut-container">
         <ResponsiveContainer width="100%" height={220}>
           <PieChart>
@@ -113,7 +155,7 @@ function StatCard({
 }: {
   title: string;
   value: string;
-  icon: string;
+  icon: React.ReactNode;
   trend?: number;
   trendLabel?: string;
   color: string;
@@ -128,12 +170,12 @@ function StatCard({
       } as React.CSSProperties}
     >
       <div className="reports-stat-header">
-        <div className="reports-stat-icon-wrapper" style={{ background: `linear-gradient(135deg, ${color}20, ${color}10)` }}>
-          <span className="reports-stat-icon">{icon}</span>
+        <div className="reports-stat-icon-wrapper" style={{ background: `linear-gradient(135deg, ${color}20, ${color}10)`, color: color }}>
+          {icon}
         </div>
-        {trend !== undefined && (
+        {trend !== undefined && trend !== 0 && (
           <div className={`reports-stat-trend ${trend >= 0 ? 'positive' : 'negative'}`}>
-            <span>{trend >= 0 ? '↑' : '↓'}</span>
+            {trend >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
             <span>{Math.abs(trend)}%</span>
           </div>
         )}
@@ -150,51 +192,16 @@ function StatCard({
   );
 }
 
-function CategoryBreakdown({ categories }: { categories: { name: string; value: number; percentage: number }[] }) {
-  const maxValue = Math.max(...categories.map(c => c.value));
-  const colors = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4'];
-
-  return (
-    <div className="reports-breakdown-card">
-      <h3 className="reports-chart-title">📊 الإيرادات حسب القسم</h3>
-      <div className="reports-breakdown-list">
-        {categories.slice(0, 6).map((cat, idx) => (
-          <div key={idx} className="reports-breakdown-item">
-            <div className="reports-breakdown-header">
-              <span className="reports-breakdown-name">{cat.name}</span>
-              <span className="reports-breakdown-value">
-                {new Intl.NumberFormat('ar-EG', { style: 'currency', currency: 'EGP' }).format(cat.value)}
-              </span>
-            </div>
-            <div className="reports-breakdown-bar-bg">
-              <div
-                className="reports-breakdown-bar-fill"
-                style={{
-                  width: `${(cat.value / maxValue) * 100}%`,
-                  background: `linear-gradient(90deg, ${colors[idx % colors.length]}, ${colors[idx % colors.length]}80)`
-                }}
-              />
-            </div>
-            <span className="reports-breakdown-percent">{cat.percentage}%</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ==================== Main Component ====================
 
 export default function ReportsPage() {
-  // State for Financial Data
-  const [revenueStats, setRevenueStats] = useState<FinancialRevenueResponse | null>(null);
+  // State for Data
   const [transactionsData, setTransactionsData] = useState<TransactionsResponse | null>(null);
-  const [categoryData, setCategoryData] = useState<AdsByCategoryResponse | null>(null);
-  const [planData, setPlanData] = useState<AdsByPlanResponse | null>(null);
+  const [allAdsItems, setAllAdsItems] = useState<TransactionAdItem[]>([]);
+  const [allSubsItems, setAllSubsItems] = useState<TransactionSubscriptionItem[]>([]);
 
   // Loading States
-  const [isLoadingStats, setIsLoadingStats] = useState(true);
-  const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Filters
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -248,110 +255,114 @@ export default function ReportsPage() {
     setPage(1);
   };
 
-  // Fetch Data
+  // Fetch Data - Get all transactions to calculate stats
   useEffect(() => {
-    const loadStats = async () => {
-      setIsLoadingStats(true);
+    const loadData = async () => {
+      setIsLoading(true);
       try {
-        const [stats, cats, plans] = await Promise.all([
-          fetchRevenueSummary({ from: dateRange.from, to: dateRange.to }),
-          fetchAdsByCategory(),
-          fetchAdsByPlan()
-        ]);
-        setRevenueStats(stats);
-        setCategoryData(cats);
-        setPlanData(plans);
-      } catch (error) {
-        console.error('Error loading revenue stats:', error);
-      } finally {
-        setIsLoadingStats(false);
-      }
-    };
-
-    loadStats();
-  }, [dateRange]);
-
-  useEffect(() => {
-    const loadTransactions = async () => {
-      setIsLoadingTable(true);
-      try {
+        // Fetch with high per_page to get all data for calculations
         const transactions = await fetchTransactions({
-          page,
-          per_page: perPage,
+          per_page: 1000,
           from: dateRange.from,
           to: dateRange.to,
         });
         setTransactionsData(transactions);
+        setAllAdsItems(transactions.ads?.items || []);
+        setAllSubsItems(transactions.subscriptions?.items || []);
       } catch (error) {
         console.error('Error loading transactions:', error);
       } finally {
-        setIsLoadingTable(false);
+        setIsLoading(false);
       }
     };
 
-    loadTransactions();
-  }, [page, perPage, dateRange]);
+    loadData();
+  }, [dateRange]);
 
-  // Derived Data
-  const stats = useMemo(() => {
-    if (!revenueStats?.summary) return null;
-    return revenueStats.summary;
-  }, [revenueStats]);
+  // Calculate stats from transactions
+  const calculatedStats = useMemo(() => {
+    const adsTotal = allAdsItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const subsTotal = allSubsItems.reduce((sum, item) => sum + (item.price || 0), 0);
+    const totalRevenue = adsTotal + subsTotal;
+    const totalTransactions = allAdsItems.length + allSubsItems.length;
 
-  const transactions = useMemo(() => {
-    if (!transactionsData) return [];
-    const items = activeTab === 'ads'
-      ? transactionsData.ads?.items || []
-      : transactionsData.subscriptions?.items || [];
+    return {
+      totalRevenue,
+      adsRevenue: adsTotal,
+      subsRevenue: subsTotal,
+      adsCount: allAdsItems.length,
+      subsCount: allSubsItems.length,
+      totalTransactions,
+    };
+  }, [allAdsItems, allSubsItems]);
 
-    if (!searchQuery) return items;
+  // Chart data - Group transactions by date
+  const chartData = useMemo(() => {
+    const dateMap = new Map<string, number>();
 
-    return items.filter((t: any) =>
-      (t.user_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      String(t.id).includes(searchQuery)
-    );
-  }, [transactionsData, activeTab, searchQuery]);
+    allAdsItems.forEach(item => {
+      const date = item.paid_at ? new Date(item.paid_at).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' }) : 'غير محدد';
+      dateMap.set(date, (dateMap.get(date) || 0) + (item.amount || 0));
+    });
 
-  const currentMeta = useMemo(() => {
-    if (!transactionsData) return null;
-    return activeTab === 'ads'
-      ? transactionsData.ads?.meta
-      : transactionsData.subscriptions?.meta;
-  }, [transactionsData, activeTab]);
+    allSubsItems.forEach(item => {
+      const date = item.subscribed_at ? new Date(item.subscribed_at).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' }) : 'غير محدد';
+      dateMap.set(date, (dateMap.get(date) || 0) + (item.price || 0));
+    });
 
-  // Chart data
-  const donutData = useMemo(() => {
-    if (!revenueStats?.breakdown) return [];
-    return [
-      { name: 'الإعلانات', value: revenueStats.breakdown.ad_payments || 0, color: '#3b82f6' },
-      { name: 'الاشتراكات', value: revenueStats.breakdown.subscriptions || 0, color: '#8b5cf6' },
-    ];
-  }, [revenueStats]);
+    return Array.from(dateMap.entries())
+      .map(([label, value]) => ({ label, value }))
+      .slice(-12); // Last 12 data points
+  }, [allAdsItems, allSubsItems]);
 
-  const planDonutData = useMemo(() => {
-    if (!planData?.by_plan) return [];
-    const colors = ['#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
-    return planData.by_plan.map((p, idx) => ({
-      name: p.plan_name || p.plan_type,
-      value: p.total_revenue || 0,
+  // Donut chart data
+  const donutData = useMemo(() => [
+    { name: 'مدفوعات الإعلانات', value: calculatedStats.adsRevenue, color: '#3b82f6' },
+    { name: 'الاشتراكات', value: calculatedStats.subsRevenue, color: '#8b5cf6' },
+  ], [calculatedStats]);
+
+  // Plan type breakdown
+  const planBreakdownData = useMemo(() => {
+    const planMap = new Map<string, number>();
+
+    allAdsItems.forEach(item => {
+      const plan = item.plan_type === 'featured' ? 'متميز' : 'ستاندرد';
+      planMap.set(plan, (planMap.get(plan) || 0) + (item.amount || 0));
+    });
+
+    allSubsItems.forEach(item => {
+      const plan = item.plan_type === 'featured' ? 'متميز' : 'ستاندرد';
+      planMap.set(plan, (planMap.get(plan) || 0) + (item.price || 0));
+    });
+
+    const colors = ['#f59e0b', '#10b981'];
+    return Array.from(planMap.entries()).map(([name, value], idx) => ({
+      name,
+      value,
       color: colors[idx % colors.length]
     }));
-  }, [planData]);
+  }, [allAdsItems, allSubsItems]);
 
-  const categoryBreakdownData = useMemo(() => {
-    if (!revenueStats?.by_category) return [];
-    return revenueStats.by_category.map(c => ({
-      name: c.category_name,
-      value: c.revenue,
-      percentage: c.percentage
-    }));
-  }, [revenueStats]);
+  // Filtered transactions for table
+  const displayedTransactions = useMemo(() => {
+    const items = activeTab === 'ads' ? allAdsItems : allSubsItems;
 
-  // Chart data for area chart
-  const chartData = useMemo(() => {
-    if (!revenueStats?.chart_data) return [];
-    return revenueStats.chart_data;
-  }, [revenueStats]);
+    let filtered = items;
+    if (searchQuery) {
+      filtered = items.filter((t: any) =>
+        (t.user_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        String(t.id).includes(searchQuery)
+      );
+    }
+
+    // Paginate
+    const start = (page - 1) * perPage;
+    const end = start + perPage;
+    return filtered.slice(start, end);
+  }, [allAdsItems, allSubsItems, activeTab, searchQuery, page, perPage]);
+
+  const totalItems = activeTab === 'ads' ? allAdsItems.length : allSubsItems.length;
+  const totalPages = Math.ceil(totalItems / perPage);
 
   // Helper for currency formatting
   const formatCurrency = (amount: number) => {
@@ -371,7 +382,10 @@ export default function ReportsPage() {
         <div className="reports-hero-pattern" />
         <div className="reports-hero-content">
           <div className="reports-hero-text">
-            <h1 className="reports-hero-title">📊 التقارير المالية</h1>
+            <h1 className="reports-hero-title">
+              <BarChart3 size={32} style={{ marginLeft: 12 }} />
+              التقارير المالية
+            </h1>
             <p className="reports-hero-subtitle">
               نظرة شاملة على الإيرادات، المعاملات المالية، واشتراكات المعلنين
             </p>
@@ -398,18 +412,18 @@ export default function ReportsPage() {
         {/* Quick Period Filters */}
         <div className="reports-quick-filters">
           {[
-            { key: 'today', label: 'اليوم', icon: '📅' },
-            { key: 'week', label: 'هذا الأسبوع', icon: '📆' },
-            { key: 'month', label: 'هذا الشهر', icon: '🗓️' },
-            { key: 'year', label: 'هذه السنة', icon: '📊' },
-            { key: 'custom', label: 'مخصص', icon: '⚙️' },
+            { key: 'today', label: 'اليوم', icon: <Calendar size={16} /> },
+            { key: 'week', label: 'هذا الأسبوع', icon: <CalendarDays size={16} /> },
+            { key: 'month', label: 'هذا الشهر', icon: <CalendarRange size={16} /> },
+            { key: 'year', label: 'هذه السنة', icon: <CalendarClock size={16} /> },
+            { key: 'custom', label: 'مخصص', icon: <Settings2 size={16} /> },
           ].map((period) => (
             <button
               key={period.key}
               className={`reports-filter-btn ${activePeriod === period.key ? 'active' : ''}`}
               onClick={() => handlePeriodChange(period.key as typeof activePeriod)}
             >
-              <span>{period.icon}</span>
+              {period.icon}
               <span>{period.label}</span>
             </button>
           ))}
@@ -440,7 +454,7 @@ export default function ReportsPage() {
 
       {/* Stats Cards Grid */}
       <div className="reports-stats-grid">
-        {isLoadingStats ? (
+        {isLoading ? (
           [1, 2, 3, 4].map(i => (
             <div key={i} className="reports-stat-card skeleton">
               <div className="skeleton-icon" />
@@ -452,31 +466,32 @@ export default function ReportsPage() {
           <>
             <StatCard
               title="إجمالي الإيرادات"
-              value={formatCurrency(stats?.total_revenue || 0)}
-              icon="💰"
-              trend={stats?.growth_rate}
-              trendLabel="مقارنة بالفترة السابقة"
+              value={formatCurrency(calculatedStats.totalRevenue)}
+              icon={<Wallet size={24} />}
               color="#10b981"
               delay={0}
             />
             <StatCard
               title="إيرادات الإعلانات"
-              value={formatCurrency(revenueStats?.breakdown?.ad_payments || 0)}
-              icon="📢"
+              value={formatCurrency(calculatedStats.adsRevenue)}
+              icon={<Megaphone size={24} />}
+              trendLabel={`${calculatedStats.adsCount} معاملة`}
               color="#3b82f6"
               delay={100}
             />
             <StatCard
               title="إيرادات الاشتراكات"
-              value={formatCurrency(revenueStats?.breakdown?.subscriptions || 0)}
-              icon="👔"
+              value={formatCurrency(calculatedStats.subsRevenue)}
+              icon={<Briefcase size={24} />}
+              trendLabel={`${calculatedStats.subsCount} اشتراك`}
               color="#8b5cf6"
               delay={200}
             />
             <StatCard
-              title="الفترة السابقة"
-              value={formatCurrency(stats?.previous_period || 0)}
-              icon="📈"
+              title="إجمالي المعاملات"
+              value={calculatedStats.totalTransactions.toString()}
+              icon={<Receipt size={24} />}
+              trendLabel="في الفترة المحددة"
               color="#f59e0b"
               delay={300}
             />
@@ -486,11 +501,32 @@ export default function ReportsPage() {
 
       {/* Charts Section */}
       <div className="reports-charts-section">
-        {/* Revenue Timeline Chart */}
-        <div className="reports-chart-card reports-main-chart">
-          <h3 className="reports-chart-title">📈 تحليل الإيرادات</h3>
+        {/* Donut Charts - Side by Side */}
+        <div className="reports-donuts-row">
+          <DonutChart
+            data={donutData}
+            title="توزيع الإيرادات"
+            icon={<CreditCard size={20} />}
+            centerValue={formatShortCurrency(calculatedStats.totalRevenue)}
+            centerLabel="الإجمالي"
+          />
+          <DonutChart
+            data={planBreakdownData}
+            title="الإيرادات حسب الباقة"
+            icon={<Package size={20} />}
+            centerValue={calculatedStats.totalTransactions.toString()}
+            centerLabel="معاملة"
+          />
+        </div>
+
+        {/* Revenue Timeline Chart - Full Width */}
+        <div className="reports-chart-card reports-area-chart-full">
+          <h3 className="reports-chart-title">
+            <TrendingUp size={20} style={{ marginLeft: 8 }} />
+            تحليل الإيرادات
+          </h3>
           <div className="reports-chart-container">
-            {isLoadingStats ? (
+            {isLoading ? (
               <div className="reports-chart-loading">
                 <div className="reports-loading-spinner" />
                 <span>جارٍ تحميل الرسم البياني...</span>
@@ -544,56 +580,36 @@ export default function ReportsPage() {
               </ResponsiveContainer>
             ) : (
               <div className="reports-chart-empty">
-                <span className="reports-empty-icon">📊</span>
+                <BarChart3 size={48} strokeWidth={1} />
                 <p>لا توجد بيانات للرسم البياني</p>
               </div>
             )}
           </div>
         </div>
-
-        {/* Donut Charts */}
-        <div className="reports-donuts-grid">
-          <DonutChart
-            data={donutData}
-            title="💳 توزيع الإيرادات"
-            centerValue={formatShortCurrency(stats?.total_revenue || 0)}
-            centerLabel="الإجمالي"
-          />
-          {planDonutData.length > 0 && (
-            <DonutChart
-              data={planDonutData}
-              title="📦 الإيرادات حسب الباقة"
-              centerValue={planData?.total_ads?.toString() || '0'}
-              centerLabel="إعلان"
-            />
-          )}
-        </div>
       </div>
-
-      {/* Category Breakdown */}
-      {categoryBreakdownData.length > 0 && (
-        <CategoryBreakdown categories={categoryBreakdownData} />
-      )}
 
       {/* Transactions Table Section */}
       <div className="reports-table-section">
         <div className="reports-table-header">
           <div className="reports-table-title-section">
-            <h3 className="reports-table-title">📝 سجل المعاملات</h3>
+            <h3 className="reports-table-title">
+              <FileText size={20} style={{ marginLeft: 8 }} />
+              سجل المعاملات
+            </h3>
             <span className="reports-table-count">
-              {currentMeta?.total || 0} معاملة
+              {totalItems} معاملة
             </span>
           </div>
 
           <div className="reports-table-controls">
             {/* Search */}
             <div className="reports-search-box">
-              <span className="reports-search-icon">🔍</span>
+              <Search size={18} className="reports-search-icon" />
               <input
                 type="text"
                 placeholder="بحث بالاسم أو رقم المعاملة..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
                 className="reports-search-input"
               />
             </div>
@@ -604,14 +620,14 @@ export default function ReportsPage() {
                 onClick={() => { setActiveTab('ads'); setPage(1); }}
                 className={`reports-tab ${activeTab === 'ads' ? 'active' : ''}`}
               >
-                <span>📢</span>
+                <Megaphone size={16} />
                 مدفوعات الإعلانات
               </button>
               <button
                 onClick={() => { setActiveTab('subscriptions'); setPage(1); }}
                 className={`reports-tab ${activeTab === 'subscriptions' ? 'active' : ''}`}
               >
-                <span>👔</span>
+                <Briefcase size={16} />
                 الاشتراكات
               </button>
             </div>
@@ -619,7 +635,7 @@ export default function ReportsPage() {
         </div>
 
         <div className="reports-table-container">
-          {isLoadingTable ? (
+          {isLoading ? (
             <div className="reports-table-loading">
               <div className="reports-loading-spinner" />
               <span>جارٍ تحميل البيانات...</span>
@@ -644,18 +660,18 @@ export default function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {transactions.length === 0 ? (
+                {displayedTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={activeTab === 'ads' ? 6 : 7} className="reports-empty-row">
                       <div className="reports-empty-state">
-                        <span className="reports-empty-icon">📭</span>
+                        <FileText size={48} strokeWidth={1} />
                         <h4>لا توجد معاملات</h4>
                         <p>لم يتم العثور على بيانات في هذه الفترة</p>
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  transactions.map((t: any, idx: number) => {
+                  displayedTransactions.map((t: any, idx: number) => {
                     const userName = t.user_name || 'مستخدم غير معروف';
                     const amount = t.amount !== undefined ? t.amount : (t.price !== undefined ? t.price : 0);
                     const dateStr = t.paid_at || t.subscribed_at || t.created_at || new Date().toISOString();
@@ -699,8 +715,8 @@ export default function ReportsPage() {
 
                         <td>
                           <span className={`reports-status-badge ${status === 'completed' || status === 'paid' || status === 'active'
-                              ? 'success'
-                              : 'pending'
+                            ? 'success'
+                            : 'pending'
                             }`}>
                             {status === 'completed' || status === 'paid' ? 'مكتمل' : (status === 'active' ? 'نشط' : status)}
                           </span>
@@ -715,37 +731,40 @@ export default function ReportsPage() {
         </div>
 
         {/* Pagination */}
-        {currentMeta && currentMeta.last_page > 1 && (
+        {totalPages > 1 && (
           <div className="reports-pagination">
             <div className="reports-pagination-info">
-              صفحة <strong>{currentMeta.page}</strong> من <strong>{currentMeta.last_page}</strong>
-              <span className="reports-pagination-total">• إجمالي {currentMeta.total} معاملة</span>
+              صفحة <strong>{page}</strong> من <strong>{totalPages}</strong>
+              <span className="reports-pagination-total">• إجمالي {totalItems} معاملة</span>
             </div>
             <div className="reports-pagination-controls">
               <button
                 disabled={page === 1}
                 onClick={() => setPage(1)}
                 className="reports-pagination-btn"
+                title="الأولى"
               >
-                ⟪ الأولى
+                <ChevronsRight size={16} />
               </button>
               <button
                 disabled={page === 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 className="reports-pagination-btn"
+                title="السابق"
               >
-                → السابق
+                <ChevronRight size={16} />
+                السابق
               </button>
 
               <div className="reports-pagination-pages">
-                {Array.from({ length: Math.min(5, currentMeta.last_page) }, (_, i) => {
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   let pageNum;
-                  if (currentMeta.last_page <= 5) {
+                  if (totalPages <= 5) {
                     pageNum = i + 1;
                   } else if (page <= 3) {
                     pageNum = i + 1;
-                  } else if (page >= currentMeta.last_page - 2) {
-                    pageNum = currentMeta.last_page - 4 + i;
+                  } else if (page >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
                   } else {
                     pageNum = page - 2 + i;
                   }
@@ -762,18 +781,21 @@ export default function ReportsPage() {
               </div>
 
               <button
-                disabled={page === currentMeta.last_page}
+                disabled={page === totalPages}
                 onClick={() => setPage(p => p + 1)}
                 className="reports-pagination-btn"
+                title="التالي"
               >
-                التالي ←
+                التالي
+                <ChevronLeft size={16} />
               </button>
               <button
-                disabled={page === currentMeta.last_page}
-                onClick={() => setPage(currentMeta.last_page)}
+                disabled={page === totalPages}
+                onClick={() => setPage(totalPages)}
                 className="reports-pagination-btn"
+                title="الأخيرة"
               >
-                الأخيرة ⟫
+                <ChevronsLeft size={16} />
               </button>
             </div>
           </div>

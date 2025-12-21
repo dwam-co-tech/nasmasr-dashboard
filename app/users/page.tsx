@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import ManagedSelect from '@/components/ManagedSelect';
 import { CATEGORY_LABELS_AR } from '@/constants/categories';
-import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured } from '@/services/users';
+import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured, fetchDelegateClients } from '@/services/users';
 import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
-import { UsersMeta, AssignUserPackagePayload, UsersSummaryResponse } from '@/models/users';
+import { UsersMeta, AssignUserPackagePayload, UsersSummaryResponse, DelegateClient } from '@/models/users';
 
 interface User {
   id: string;
@@ -223,12 +223,12 @@ export default function UsersPage() {
   const [packagesForm, setPackagesForm] = useState<UserPackage>({
     featuredAds: 0,
     featuredDays: 0,
-    startFeaturedNow: false,
+    startFeaturedNow: true,
     featuredStartDate: null,
     featuredExpiryDate: null,
     standardAds: 0,
     standardDays: 0,
-    startStandardNow: false,
+    startStandardNow: true,
     standardStartDate: null,
     standardExpiryDate: null,
   });
@@ -242,6 +242,12 @@ export default function UsersPage() {
   const [isFavoritesModalOpen, setIsFavoritesModalOpen] = useState(false);
   const [selectedUserForFavorites, setSelectedUserForFavorites] = useState<User | null>(null);
   const [favoriteSlugs, setFavoriteSlugs] = useState<string[]>([]);
+
+  // Delegate Clients modal state
+  const [isDelegateClientsModalOpen, setIsDelegateClientsModalOpen] = useState(false);
+  const [delegateClients, setDelegateClients] = useState<DelegateClient[]>([]);
+  const [isFetchingClients, setIsFetchingClients] = useState(false);
+  const [selectedDelegateForClients, setSelectedDelegateForClients] = useState<User | null>(null);
 
   const openAdDetailsModal = (ad: AdItem) => {
     setAdInModal(ad);
@@ -271,7 +277,20 @@ export default function UsersPage() {
   const copyVerificationCode = async () => {
     if (!verificationCode) return;
     try {
-      await navigator.clipboard.writeText(verificationCode);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(verificationCode);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = verificationCode;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
       showToast('تم نسخ كود التحقق بنجاح', 'success');
     } catch (e) {
       showToast('تعذر النسخ تلقائيًا، يرجى النسخ يدويًا', 'warning');
@@ -693,12 +712,12 @@ export default function UsersPage() {
           user.package ?? {
             featuredAds: 0,
             featuredDays: 0,
-            startFeaturedNow: false,
+            startFeaturedNow: true,
             featuredStartDate: null,
             featuredExpiryDate: null,
             standardAds: 0,
             standardDays: 0,
-            startStandardNow: false,
+            startStandardNow: true,
             standardStartDate: null,
             standardExpiryDate: null,
           }
@@ -709,12 +728,12 @@ export default function UsersPage() {
         user.package ?? {
           featuredAds: 0,
           featuredDays: 0,
-          startFeaturedNow: false,
+          startFeaturedNow: true,
           featuredStartDate: null,
           featuredExpiryDate: null,
           standardAds: 0,
           standardDays: 0,
-          startStandardNow: false,
+          startStandardNow: true,
           standardStartDate: null,
           standardExpiryDate: null,
         }
@@ -762,13 +781,15 @@ export default function UsersPage() {
         standard_ads: Number(packagesForm.standardAds) || 0,
         standard_days: Number(packagesForm.standardDays) || 0,
       };
+
+      // Force start_now even if not explicitly checked, or rely on form
       if (packagesForm.startFeaturedNow) payload.start_featured_now = true;
       if (packagesForm.startStandardNow) payload.start_standard_now = true;
 
-      if (packagesForm.featuredStartDate) payload.featured_start_date = new Date(packagesForm.featuredStartDate).toISOString();
-      if (packagesForm.featuredExpiryDate) payload.featured_expire_date = new Date(packagesForm.featuredExpiryDate).toISOString();
-      if (packagesForm.standardStartDate) payload.standard_start_date = new Date(packagesForm.standardStartDate).toISOString();
-      if (packagesForm.standardExpiryDate) payload.standard_expire_date = new Date(packagesForm.standardExpiryDate).toISOString();
+      // We don't need to send explicit dates if we are using "Days" and "Start Now"
+      // But if they are fixed, let's keep them optional or remove them
+      // In this case, we prefer the backend to calculate the date from featured_days
+
       const resp = await assignUserPackage(payload);
       const d = resp.data;
       try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch { }
@@ -794,10 +815,8 @@ export default function UsersPage() {
       setIsPackagesModalOpen(false);
       setSelectedUserForPackages(null);
       const idText = typeof d.id === 'number' ? String(d.id) : '';
-      const daysText = typeof d.standard_days === 'number' ? String(d.standard_days) : '';
-      const adsText = typeof d.standard_ads === 'number' ? String(d.standard_ads) : '';
-      const info = idText || daysText || adsText ? ` | ID: ${idText} | الأيام: ${daysText} | الإعلانات: ${adsText}` : '';
-      showToast((resp.message || 'تم تحديث الباقة بنجاح') + info, 'success');
+      const daysText = `${d.featured_days || 0} مميزة | ${d.standard_days || 0} ستاندرد`;
+      showToast((resp.message || 'تم تحديث الباقة بنجاح') + ` | ${daysText}`, 'success');
     } catch (e) {
       showToast('تعذر حفظ الباقة للمستخدم', 'error');
     }
@@ -939,37 +958,80 @@ export default function UsersPage() {
     showToast(`تم إرسال رابط إعادة تعيين كلمة السر للمستخدم ${user?.name}`, 'success');
   };
 
-  const handleChangePassword = (userId: string) => {
+  const handleChangePassword = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) {
       showToast('تعذر العثور على المستخدم', 'error');
       return;
     }
 
-    const newPassword = '123456789';
+    const newPassword = '123456';
 
-    setUsers(users.map(u =>
-      u.id === userId
-        ? { ...u, lastLogin: new Date().toISOString().split('T')[0] }
-        : u
-    ));
-
-    const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
-    if (!phoneNormalized) {
-      showToast('رقم هاتف المستخدم غير صالح لإرسال واتساب', 'warning');
-      return;
+    // 1. Copy password to clipboard IMMEDIATELY to preserve user gesture context
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(newPassword);
+      } else {
+        // Fallback for non-secure context (HTTP)
+        const textArea = document.createElement("textarea");
+        textArea.value = newPassword;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+    } catch (err) {
+      console.warn('Initial clipboard copy failed:', err);
     }
 
-    const message = encodeURIComponent(
-      `مرحبًا ${user.name}، تم تغيير كلمة السر الخاصة بحسابك إلى: ${newPassword}.\nيرجى تسجيل الدخول وتغييرها بعد أول دخول.\nفريق ناس مصر`
-    );
-    const waUrl = `https://wa.me/${phoneNormalized}?text=${message}`;
-
     try {
+      // 2. Call Backend API to reset password to '123456'
+      const response = await changeUserPassword(userId);
+
+      // 3. Update local state
+      setUsers(users.map(u =>
+        u.id === userId
+          ? { ...u, lastLogin: new Date().toISOString().split('T')[0] }
+          : u
+      ));
+
+      // 4. Prepare WhatsApp Message
+      const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
+      if (!phoneNormalized) {
+        showToast('تم تغيير كلمة السر ونسخها، لكن رقم الهاتف غير صالح لإرسال واتساب', 'warning');
+        return;
+      }
+
+      // Use the exact message from the backend
+      const messageContent = response.message || `مرحبًا ${user.name}، تم تغيير كلمة السر الخاصة بحسابك إلى: ${newPassword}.\nيرجى تسجيل الدخول وتغييرها بعد أول دخول.\nفريق ناس مصر`;
+      const waUrl = `https://wa.me/${phoneNormalized}?text=${encodeURIComponent(messageContent)}`;
+
+      // 5. Open WhatsApp
       window.open(waUrl, '_blank');
-      showToast(`تم تغيير كلمة السر وإرسالها عبر واتساب للمستخدم ${user.name}`, 'success');
-    } catch (e) {
-      showToast('تم تغيير كلمة السر، لكن تعذر فتح واتساب', 'warning');
+      showToast(`تم تغيير كلمة السر ونسخها (123456) وإرسالها عبر واتساب للمستخدم ${user.name}`, 'success');
+
+    } catch (e: any) {
+      console.error('Change password failed:', e);
+      showToast(e.message || 'تعذر تغيير كلمة السر للمستخدم، يرجى المحاولة لاحقاً', 'error');
+    }
+  };
+
+  const handleOpenDelegateClients = async (user: User) => {
+    setSelectedDelegateForClients(user);
+    setIsDelegateClientsModalOpen(true);
+    setIsFetchingClients(true);
+    setDelegateClients([]);
+    try {
+      const response = await fetchDelegateClients(user.id);
+      setDelegateClients(response.data || []);
+    } catch (e: any) {
+      showToast(e.message || 'تعذر جلب قائمة عملاء المندوب', 'error');
+    } finally {
+      setIsFetchingClients(false);
     }
   };
 
@@ -1617,8 +1679,8 @@ export default function UsersPage() {
                         onChange={(e) => handlePackagesChange('featuredAds', Number(e.target.value))}
                       />
                     </div>
-                    {/* <div className="field">
-                      <label>عدد الأيام للمتميزة</label>
+                    <div className="field">
+                      <label>عدد أيام صلاحية المتميزة</label>
                       <input
                         type="number"
                         className="form-input"
@@ -1626,28 +1688,6 @@ export default function UsersPage() {
                         value={packagesForm.featuredDays}
                         onChange={(e) => handlePackagesChange('featuredDays', Number(e.target.value))}
                       />
-                    </div> */}
-                    <div className="field expiry">
-                      <label>تاريخ انتهاء المتميزة</label>
-                      <div className="input-with-days">
-                        <input
-                          type="date"
-                          className="form-input has-days"
-                          value={packagesForm.featuredExpiryDate || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            handlePackagesChange('featuredExpiryDate', val);
-                            if (packagesForm.startFeaturedNow) {
-                              const dayMs = 24 * 60 * 60 * 1000;
-                              const now = new Date(); now.setHours(0, 0, 0, 0);
-                              const exp = new Date(val); exp.setHours(0, 0, 0, 0);
-                              const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
-                              handlePackagesChange('featuredDays', days);
-                            }
-                          }}
-                        />
-                        <div className="days-inside">متبقي: {getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate)} يوم</div>
-                      </div>
                     </div>
                   </div>
                   <label className="toggle-label compact">
@@ -1690,8 +1730,8 @@ export default function UsersPage() {
                         onChange={(e) => handlePackagesChange('standardAds', Number(e.target.value))}
                       />
                     </div>
-                    {/* <div className="field">
-                      <label>عدد الأيام للستاندر</label>
+                    <div className="field">
+                      <label>عدد أيام صلاحية الستاندر</label>
                       <input
                         type="number"
                         className="form-input"
@@ -1699,28 +1739,6 @@ export default function UsersPage() {
                         value={packagesForm.standardDays}
                         onChange={(e) => handlePackagesChange('standardDays', Number(e.target.value))}
                       />
-                    </div> */}
-                    <div className="field expiry">
-                      <label>تاريخ انتهاء الستاندر</label>
-                      <div className="input-with-days">
-                        <input
-                          type="date"
-                          className="form-input has-days"
-                          value={packagesForm.standardExpiryDate || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            handlePackagesChange('standardExpiryDate', val);
-                            if (packagesForm.startStandardNow) {
-                              const dayMs = 24 * 60 * 60 * 1000;
-                              const now = new Date(); now.setHours(0, 0, 0, 0);
-                              const exp = new Date(val); exp.setHours(0, 0, 0, 0);
-                              const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
-                              handlePackagesChange('standardDays', days);
-                            }
-                          }}
-                        />
-                        <div className="days-inside">متبقي: {getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate)} يوم</div>
-                      </div>
                     </div>
                   </div>
                   <label className="toggle-label compact">
@@ -1822,6 +1840,107 @@ export default function UsersPage() {
             <div className="modal-footer">
               <button className="btn-cancel" onClick={clearFavoritesForUser}>إلغاء التفضيل للجميع</button>
               <button className="btn-save" onClick={saveFavoritesForUser}>حفظ</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delegate Clients Modal */}
+      {isDelegateClientsModalOpen && selectedDelegateForClients && (
+        <div className="modal-overlay" onClick={() => setIsDelegateClientsModalOpen(false)}>
+          <div className="delegate-clients-modal" onClick={(e) => e.stopPropagation()} style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            width: '90%',
+            maxWidth: '600px',
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            overflow: 'hidden'
+          }}>
+            <div className="modal-header" style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#6366f1',
+              color: 'white'
+            }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>عملاء المندوب: {selectedDelegateForClients.name}</h3>
+              <button onClick={() => setIsDelegateClientsModalOpen(false)} style={{
+                background: 'none',
+                border: 'none',
+                color: 'white',
+                fontSize: '20px',
+                cursor: 'pointer'
+              }}>✕</button>
+            </div>
+            <div className="modal-content" style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+              {isFetchingClients ? (
+                <div style={{ textAlign: 'center', padding: '40px' }}>
+                  <div style={{
+                    border: '3px solid #f3f4f6',
+                    borderTop: '3px solid #6366f1',
+                    borderRadius: '50%',
+                    width: '30px',
+                    height: '30px',
+                    margin: '0 auto 10px'
+                  }}></div>
+                  <p>جاري جلب القائمة...</p>
+                </div>
+              ) : delegateClients.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {delegateClients.map((client) => (
+                    <div key={client.id} style={{
+                      padding: '12px 16px',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}>
+                      <div style={{ fontWeight: 'bold', color: '#111827', fontSize: '15px' }}>{client.name || 'مستخدِم بدون اسم'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ fontSize: '13px', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ color: '#6366f1' }}>📞</span> {client.phone}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ color: '#6366f1' }}>📍</span> {client.address || 'غير محدد'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '10px' }}>👥</div>
+                  <p>لا يوجد عملاء مرتبطين بهذا المندوب حالياً.</p>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer" style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #f3f4f6',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              backgroundColor: '#f9fafb'
+            }}>
+              <button
+                onClick={() => setIsDelegateClientsModalOpen(false)}
+                className="btn-cancel"
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  cursor: 'pointer',
+                  fontWeight: '600'
+                }}
+              >
+                إغلاق
+              </button>
             </div>
           </div>
         </div>
@@ -2026,8 +2145,8 @@ export default function UsersPage() {
                         🔑
                       </button> */}
                       <button
-                        className="btn-set-pin"
-                        onClick={() => handleSetPIN(user.id)}
+                        className="btn-change-password"
+                        onClick={() => handleChangePassword(user.id)}
                         title="تغيير كلمة السر"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2065,6 +2184,32 @@ export default function UsersPage() {
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="white" />
+                          </svg>
+                        </button>
+                      )}
+                      {(user.role === 'representative' || user.role === 'مندوب') && (
+                        <button
+                          className="btn-delegate-clients"
+                          onClick={() => handleOpenDelegateClients(user)}
+                          title="عملاء المندوب"
+                          style={{
+                            backgroundColor: '#6366f1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '4px 8px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: '4px'
+                          }}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <circle cx="9" cy="7" r="4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </button>
                       )}
@@ -2172,6 +2317,25 @@ export default function UsersPage() {
                 >
                   {user.status === 'active' ? 'حظر' : 'إلغاء الحظر'}
                 </button>
+                {(user.role === 'representative' || user.role === 'مندوب') && (
+                  <button
+                    className="btn-delegate-clients"
+                    onClick={() => handleOpenDelegateClients(user)}
+                    title="عملاء المندوب"
+                    style={{
+                      backgroundColor: '#6366f1',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '4px 12px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    عملاء المندوب
+                  </button>
+                )}
                 {/* <button
                   className="btn-reset-password"
                   onClick={() => handleResetPassword(user.id)}
