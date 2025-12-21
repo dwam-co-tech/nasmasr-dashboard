@@ -345,7 +345,7 @@ export default function ReportsPage() {
 
   // Filtered transactions for table
   const displayedTransactions = useMemo(() => {
-    const items = activeTab === 'ads' ? allAdsItems : allSubsItems;
+    const items: (TransactionAdItem | TransactionSubscriptionItem)[] = activeTab === 'ads' ? allAdsItems : allSubsItems;
 
     let filtered = items;
     if (searchQuery) {
