@@ -9,6 +9,7 @@ export interface UserSummary {
   id: number;
   name: string | null;
   phone: string;
+  address: string | null;
   user_code: string;
   status: string;
   registered_at: string;
@@ -176,6 +177,10 @@ export interface DelegateClient {
   lng: string | null;
   status: string;
   role: string;
+  user_code: string;
+  registered_at: string;
+  listings_count: number;
+  phone_verified: boolean;
 }
 
 export interface DelegateClientsResponse {

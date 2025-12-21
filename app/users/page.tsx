@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import ManagedSelect from '@/components/ManagedSelect';
 import { CATEGORY_LABELS_AR } from '@/constants/categories';
+import { User as UserIcon, Phone, MapPin, ExternalLink, Users, Search, RefreshCw } from 'lucide-react';
 import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured, fetchDelegateClients } from '@/services/users';
 import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
 import { UsersMeta, AssignUserPackagePayload, UsersSummaryResponse, DelegateClient } from '@/models/users';
@@ -12,6 +13,7 @@ interface User {
   id: string;
   name: string;
   phone: string;
+  address?: string | null;
   userCode: string;
   status: 'active' | 'banned';
   registrationDate: string;
@@ -125,7 +127,8 @@ export default function UsersPage() {
           id: String(u.id),
           name: u.name ?? '',
           phone: u.phone,
-          userCode: String(u.id),
+          address: u.address,
+          userCode: u.user_code,
           status: u.status === 'active' ? 'active' : 'banned',
           registrationDate: u.registered_at,
           adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
@@ -433,7 +436,8 @@ export default function UsersPage() {
         id: String(u.id),
         name: u.name ?? '',
         phone: u.phone,
-        userCode: String(u.id),
+        address: u.address,
+        userCode: u.user_code,
         status: u.status === 'active' ? 'active' : 'banned',
         registrationDate: u.registered_at,
         adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
@@ -935,7 +939,8 @@ export default function UsersPage() {
         id: String(u.id),
         name: u.name ?? '',
         phone: u.phone,
-        userCode: String(u.id),
+        address: u.address,
+        userCode: u.user_code,
         status: u.status === 'active' ? 'active' : 'banned',
         registrationDate: u.registered_at,
         adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
@@ -1035,6 +1040,24 @@ export default function UsersPage() {
     }
   };
 
+  const handleViewClientProfile = (client: DelegateClient) => {
+    const userToView: User = {
+      id: String(client.id),
+      name: client.name || 'مستخدِم بدون اسم',
+      phone: client.phone,
+      address: client.address,
+      userCode: client.user_code,
+      status: client.status === 'banned' || client.status === 'blocked' ? 'banned' : 'active',
+      registrationDate: client.registered_at,
+      adsCount: client.listings_count,
+      role: client.role,
+      lastLogin: '',
+      phoneVerified: client.phone_verified,
+    };
+    setIsDelegateClientsModalOpen(false);
+    handleViewProfile(userToView);
+  };
+
   const handleSetPIN = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) {
@@ -1115,7 +1138,7 @@ export default function UsersPage() {
     const rows = data.map(u => ({
       'الاسم': u.name,
       'رقم الهاتف': u.phone,
-      'كود المستخدم': u.userCode,
+      'كود المندوب': u.userCode,
       'الحالة': u.status === 'active' ? 'نشط' : 'محظور',
       'تاريخ التسجيل': u.registrationDate,
       // 'عدد الإعلانات': u.adsCount,
@@ -1148,7 +1171,7 @@ export default function UsersPage() {
               ← العودة للقائمة
             </button>
             <h1>ملف المستخدم: {selectedUser.name}</h1>
-            <p>كود المستخدم: {selectedUser.userCode}</p>
+            <p>كود المندوب: {selectedUser.userCode}</p>
           </div>
         </div>
 
@@ -1240,7 +1263,22 @@ export default function UsersPage() {
                     )}
                   </div>
                   <div className="data-item">
-                    <label>كود المستخدم:</label>
+                    <label>العنوان:</label>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editForm?.address ?? ''}
+                        onChange={(e) =>
+                          setEditForm((prev) => (prev ? { ...prev, address: e.target.value } : prev))
+                        }
+                        className="input"
+                      />
+                    ) : (
+                      <span>{selectedUser.address || 'موقع غير محدد'}</span>
+                    )}
+                  </div>
+                  <div className="data-item">
+                    <label>كود المندوب:</label>
                     {isEditing ? (
                       <input
                         type="text"
@@ -1289,7 +1327,7 @@ export default function UsersPage() {
                         className="input"
                       />
                     ) : (
-                      <span>{selectedUser.registrationDate}</span>
+                      <span>{formatDateDDMMYYYY(selectedUser.registrationDate)}</span>
                     )}
                   </div>
                   {/* <div className="data-item">
@@ -1849,97 +1887,184 @@ export default function UsersPage() {
         <div className="modal-overlay" onClick={() => setIsDelegateClientsModalOpen(false)}>
           <div className="delegate-clients-modal" onClick={(e) => e.stopPropagation()} style={{
             backgroundColor: 'white',
-            borderRadius: '12px',
-            width: '90%',
-            maxWidth: '600px',
-            maxHeight: '80vh',
+            borderRadius: '16px',
+            width: '95%',
+            maxWidth: '650px',
+            maxHeight: '85vh',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-            overflow: 'hidden'
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            overflow: 'hidden',
+            border: '1px solid #e5e7eb',
+            animation: 'modalFadeIn 0.3s ease-out'
           }}>
             <div className="modal-header" style={{
-              padding: '16px 20px',
+              padding: '20px 24px',
               borderBottom: '1px solid #f3f4f6',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              backgroundColor: '#6366f1',
+              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
               color: 'white'
             }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>عملاء المندوب: {selectedDelegateForClients.name}</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '8px', borderRadius: '10px' }}>
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>عملاء المندوب</h3>
+                  <p style={{ margin: 0, fontSize: '13px', opacity: 0.9 }}>{selectedDelegateForClients.name}</p>
+                </div>
+              </div>
               <button onClick={() => setIsDelegateClientsModalOpen(false)} style={{
-                background: 'none',
+                background: 'rgba(255,255,255,0.1)',
                 border: 'none',
                 color: 'white',
-                fontSize: '20px',
-                cursor: 'pointer'
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
               }}>✕</button>
             </div>
-            <div className="modal-content" style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+
+            <div className="modal-content" style={{ padding: '24px', overflowY: 'auto', flex: 1, backgroundColor: '#f9fafb' }}>
               {isFetchingClients ? (
-                <div style={{ textAlign: 'center', padding: '40px' }}>
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6366f1' }}>
                   <div style={{
-                    border: '3px solid #f3f4f6',
-                    borderTop: '3px solid #6366f1',
+                    border: '4px solid #f3f4f6',
+                    borderTop: '4px solid #6366f1',
                     borderRadius: '50%',
-                    width: '30px',
-                    height: '30px',
-                    margin: '0 auto 10px'
+                    width: '40px',
+                    height: '40px',
+                    margin: '0 auto 20px',
+                    animation: 'spin 1s linear infinite'
                   }}></div>
-                  <p>جاري جلب القائمة...</p>
+                  <p style={{ fontWeight: '600' }}>جاري جلب القائمة...</p>
                 </div>
               ) : delegateClients.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   {delegateClients.map((client) => (
                     <div key={client.id} style={{
-                      padding: '12px 16px',
-                      backgroundColor: '#f8fafc',
-                      borderRadius: '8px',
+                      padding: '16px',
+                      backgroundColor: 'white',
+                      borderRadius: '14px',
                       border: '1px solid #e2e8f0',
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px'
-                    }}>
-                      <div style={{ fontWeight: 'bold', color: '#111827', fontSize: '15px' }}>{client.name || 'مستخدِم بدون اسم'}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <div style={{ fontSize: '13px', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span style={{ color: '#6366f1' }}>📞</span> {client.phone}
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transition: 'transform 0.2s, box-shadow 0.2s',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                    }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0,0,0,0.05)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)';
+                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1 }}>
+                        <div style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '12px',
+                          backgroundColor: '#eef2ff',
+                          color: '#6366f1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 'bold',
+                          fontSize: '18px'
+                        }}>
+                          {client.name ? client.name.charAt(0).toUpperCase() : 'U'}
                         </div>
-                        <div style={{ fontSize: '13px', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span style={{ color: '#6366f1' }}>📍</span> {client.address || 'غير محدد'}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontWeight: '800', color: '#111827', fontSize: '15px' }}>{client.name || 'مستخدِم بدون اسم'}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                            <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Phone size={14} style={{ color: '#6366f1' }} />
+                              <span>{client.phone}</span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <MapPin size={14} style={{ color: '#6366f1' }} />
+                              <span>{client.address || 'موقع غير محدد'}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
+
+                      <button
+                        onClick={() => handleViewClientProfile(client)}
+                        title="عرض الملف الشخصي"
+                        style={{
+                          backgroundColor: '#6366f1',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '10px',
+                          padding: '10px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                          boxShadow: '0 4px 6px -1px rgba(99, 102, 241, 0.4)'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#4f46e5'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#6366f1'}
+                      >
+                        <ExternalLink size={18} />
+                      </button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
-                  <div style={{ fontSize: '40px', marginBottom: '10px' }}>👥</div>
-                  <p>لا يوجد عملاء مرتبطين بهذا المندوب حالياً.</p>
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
+                  <div style={{
+                    width: '80px',
+                    height: '80px',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 20px'
+                  }}>
+                    <Users size={40} />
+                  </div>
+                  <h4 style={{ color: '#374151', margin: '0 0 8px' }}>لا يوجد عملاء</h4>
+                  <p style={{ margin: 0, fontSize: '14px' }}>لم يقم أي مستخدمين بالتسجيل باستخدام كود هذا المندوب حتى الآن.</p>
                 </div>
               )}
             </div>
+
             <div className="modal-footer" style={{
-              padding: '12px 20px',
+              padding: '16px 24px',
               borderTop: '1px solid #f3f4f6',
               display: 'flex',
               justifyContent: 'flex-end',
-              backgroundColor: '#f9fafb'
+              backgroundColor: 'white'
             }}>
               <button
                 onClick={() => setIsDelegateClientsModalOpen(false)}
-                className="btn-cancel"
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
+                  padding: '10px 20px',
+                  borderRadius: '10px',
                   border: '1px solid #d1d5db',
                   backgroundColor: 'white',
+                  color: '#374151',
                   cursor: 'pointer',
-                  fontWeight: '600'
+                  fontWeight: '700',
+                  fontSize: '14px',
+                  transition: 'all 0.2s'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
               >
-                إغلاق
+                إغلاق النافذة
               </button>
             </div>
           </div>
@@ -2205,12 +2330,7 @@ export default function UsersPage() {
                             marginRight: '4px'
                           }}
                         >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            <circle cx="9" cy="7" r="4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
+                          <Users size={16} />
                         </button>
                       )}
                       <button
@@ -2326,13 +2446,18 @@ export default function UsersPage() {
                       backgroundColor: '#6366f1',
                       color: 'white',
                       border: 'none',
-                      borderRadius: '4px',
-                      padding: '4px 12px',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
                       cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight: 'bold'
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      boxShadow: '0 4px 6px -1px rgba(99, 102, 241, 0.2)'
                     }}
                   >
+                    <Users size={16} />
                     عملاء المندوب
                   </button>
                 )}
