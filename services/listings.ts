@@ -33,6 +33,19 @@ export async function updateSystemSettings(payload: SystemSettingsUpdateRequest,
   return raw as Record<string, unknown>;
 }
 
+export async function fetchSystemSettings(token?: string): Promise<Record<string, any>> {
+  const t = token ?? (typeof window !== "undefined" ? localStorage.getItem("authToken") ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const url = `https://api.nasmasr.app/api/system-settings`;
+  const res = await fetch(url, { method: "GET", headers });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok || !raw || typeof raw !== "object") {
+    throw new Error("تعذر جلب إعدادات النظام");
+  }
+  return raw as Record<string, any>;
+}
+
 export async function approveListing(listingId: number | string, token?: string): Promise<Record<string, unknown>> {
   const t = token ?? (typeof window !== "undefined" ? localStorage.getItem("authToken") ?? undefined : undefined);
   const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
@@ -91,14 +104,14 @@ export async function updateListingForm(categorySlug: string, listingId: number 
   const url = `https://api.nasmasr.app/api/v1/${slug}/listings/${id}`;
   const res = await fetch(url, { method: "POST", headers, body: formData });
   let raw: unknown = null;
-  try { raw = await res.json(); } catch {}
+  try { raw = await res.json(); } catch { }
   if (!res.ok || !raw || typeof raw !== "object") {
     let message = "تعذر تعديل الإعلان";
     if (raw && typeof raw === 'object') {
       const err = raw as { error?: string; message?: string } | null;
       message = err?.error || err?.message || message;
     } else {
-      try { message = await res.text(); } catch {}
+      try { message = await res.text(); } catch { }
     }
     throw new Error(message);
   }
@@ -113,14 +126,14 @@ export async function createListingForm(categorySlug: string, formData: FormData
   const url = `https://api.nasmasr.app/api/v1/${slug}/listings`;
   const res = await fetch(url, { method: "POST", headers, body: formData });
   let raw: unknown = null;
-  try { raw = await res.json(); } catch {}
+  try { raw = await res.json(); } catch { }
   if (!res.ok || !raw || typeof raw !== "object") {
     let message = "تعذر إنشاء الإعلان";
     if (raw && typeof raw === 'object') {
       const err = raw as { error?: string; message?: string } | null;
       message = err?.error || err?.message || message;
     } else {
-      try { message = await res.text(); } catch {}
+      try { message = await res.text(); } catch { }
     }
     throw new Error(message);
   }

@@ -451,6 +451,7 @@ export interface TransactionAdItem {
   amount: number;
   currency: string;
   paid_at: string;
+  created_at: string;
   payment_method: string;
   payment_reference: string;
   status: string;
@@ -468,6 +469,7 @@ export interface TransactionSubscriptionItem {
   payment_method: string;
   payment_reference: string;
   subscribed_at: string;
+  created_at: string;
   expires_at: string;
 }
 

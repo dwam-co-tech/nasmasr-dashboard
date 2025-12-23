@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import Image from 'next/image';
 import ManagedSelect from '@/components/ManagedSelect';
 import { ALL_CATEGORIES_OPTIONS } from '@/constants/categories';
-import { fetchAdminPendingListings, updateSystemSettings, approveListing, rejectListing, updateListingForm } from '@/services/listings';
+import { fetchAdminPendingListings, updateSystemSettings, approveListing, rejectListing, updateListingForm, fetchSystemSettings } from '@/services/listings';
 import { PendingListing, PendingListingsMeta } from '@/models/listings';
 
 interface Ad {
@@ -50,11 +50,11 @@ export default function ModerationPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingAd, setEditingAd] = useState<Ad | null>(null);
   const [showMobileModal, setShowMobileModal] = useState(false);
-  const [editForm, setEditForm] = useState<{ 
-    title: string; 
-    description: string; 
-    category: string; 
-    price: string; 
+  const [editForm, setEditForm] = useState<{
+    title: string;
+    description: string;
+    category: string;
+    price: string;
     currency: string;
     governorate: string;
     city: string;
@@ -78,7 +78,7 @@ export default function ModerationPage() {
     main_image_url: string;
     main_image_file: File | null;
     attributes: Record<string, string>;
-    images: (string | File)[] 
+    images: (string | File)[]
   }>({
     title: '',
     description: '',
@@ -130,15 +130,15 @@ export default function ModerationPage() {
     }
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [ads]);
-  
+
   // حساب عدد الإعلانات قيد المراجعة
   const pendingAdsCount = visibleAds.filter(ad => ad.status === 'pending').length;
-  
+
   // حساب عدد الإعلانات لكل قسم
   const getCategoryCount = (slug: string) => {
     return ads.filter(ad => (ad.categorySlug || '') === slug).length;
   };
-  
+
   // حساب إجمالي الإعلانات
   const totalAdsCount = ads.length;
   useEffect(() => {
@@ -146,8 +146,17 @@ export default function ModerationPage() {
   }, [categoryFilter]);
 
   useEffect(() => {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem('moderation:autoApprove') : null;
-    setAutoApprove(raw === 'true');
+    const loadSettings = async () => {
+      try {
+        const settings = await fetchSystemSettings();
+        if (settings && typeof settings.manual_approval !== 'undefined') {
+          setAutoApprove(!settings.manual_approval);
+        }
+      } catch (err) {
+        console.error('Failed to load system settings', err);
+      }
+    };
+    loadSettings();
   }, []);
 
   useEffect(() => {
@@ -604,50 +613,51 @@ export default function ModerationPage() {
     if (!editTargetAdId) return;
     const targetAd = ads.find(a => a.id === editTargetAdId);
 
-    setAds(prev => prev.map(ad => 
+    setAds(prev => prev.map(ad =>
       ad.id === editTargetAdId
-        ? { ...ad, 
+        ? {
+          ...ad,
+          title: editForm.title,
+          description: editForm.description,
+          category: editForm.category,
+          price: editForm.price,
+          location: `${editForm.governorate}${editForm.city ? ' - ' + editForm.city : ''}` || editForm.address || '',
+          images: editForm.images.map(i => typeof i === 'string' ? i : URL.createObjectURL(i)),
+          source: {
+            ...(ad.source || {}),
             title: editForm.title,
             description: editForm.description,
-            category: editForm.category,
             price: editForm.price,
-            location: `${editForm.governorate}${editForm.city ? ' - ' + editForm.city : ''}` || editForm.address || '',
-            images: editForm.images.map(i => typeof i === 'string' ? i : URL.createObjectURL(i)),
-            source: {
-              ...(ad.source || {}),
-              title: editForm.title,
-              description: editForm.description,
-              price: editForm.price,
-              currency: editForm.currency,
-              governorate: editForm.governorate,
-              city: editForm.city,
-              lat: editForm.lat,
-              lng: editForm.lng,
-              address: editForm.address,
-              status: editForm.status,
-              plan_type: editForm.plan_type,
-              country_code: editForm.country_code,
-              contact_phone: editForm.contact_phone,
-              whatsapp_phone: editForm.whatsapp_phone,
-              isPayment: editForm.isPayment,
-              admin_comment: editForm.admin_comment,
-              make_id: editForm.make_id ? Number(editForm.make_id) : undefined,
-              make: editForm.make,
-              model_id: editForm.model_id ? Number(editForm.model_id) : undefined,
-              model: editForm.model,
-              views: editForm.views ? Number(editForm.views) : 0,
-              rank: editForm.rank ? Number(editForm.rank) : 0,
-              publish_via: editForm.publish_via,
-              main_image_url: editForm.main_image_url,
-              attributes: editForm.attributes,
-              images_urls: editForm.images.filter((i) => i !== editForm.main_image_url),
-              images: [],
-            } as any
-          }
+            currency: editForm.currency,
+            governorate: editForm.governorate,
+            city: editForm.city,
+            lat: editForm.lat,
+            lng: editForm.lng,
+            address: editForm.address,
+            status: editForm.status,
+            plan_type: editForm.plan_type,
+            country_code: editForm.country_code,
+            contact_phone: editForm.contact_phone,
+            whatsapp_phone: editForm.whatsapp_phone,
+            isPayment: editForm.isPayment,
+            admin_comment: editForm.admin_comment,
+            make_id: editForm.make_id ? Number(editForm.make_id) : undefined,
+            make: editForm.make,
+            model_id: editForm.model_id ? Number(editForm.model_id) : undefined,
+            model: editForm.model,
+            views: editForm.views ? Number(editForm.views) : 0,
+            rank: editForm.rank ? Number(editForm.rank) : 0,
+            publish_via: editForm.publish_via,
+            main_image_url: editForm.main_image_url,
+            attributes: editForm.attributes,
+            images_urls: editForm.images.filter((i) => i !== editForm.main_image_url),
+            images: [],
+          } as any
+        }
         : ad
     ));
     if (selectedAd?.id === editTargetAdId) {
-      setSelectedAd(prev => prev ? { 
+      setSelectedAd(prev => prev ? {
         ...prev,
         title: editForm.title,
         description: editForm.description,
@@ -809,47 +819,46 @@ export default function ModerationPage() {
             </div>
           </div> */}
             {/* <div className="queue-filters"> */}
-              {/* <label className="filter-label">القسم</label> */}
-          <div className="filters-row">
-            <ManagedSelect
-              options={categoryOptions.length ? categoryOptions : ALL_CATEGORIES_OPTIONS}
-              value={categoryFilter}
-              onChange={(v) => setCategoryFilter(v)}
-              placeholder={`كل الأقسام (${totalAdsCount})`}
-              getCount={getCategoryCount}
-              className="category-select-wide"
-            />
-            <label className="toggle-label compact">
-              <span className="toggle-text">الموافقة التلقائية على الإعلانات</span>
-              <div className="toggle-switch-container">
-                <input
-                  type="checkbox"
-                  className="toggle-input"
-                  checked={autoApprove}
-                  onChange={(e) => {
-                    const v = e.target.checked;
-                    setAutoApprove(v);
-                    localStorage.setItem('moderation:autoApprove', String(v));
-                    if (v) {
-                      localStorage.setItem('moderation:autoApproveActivatedAt', new Date().toISOString());
-                    } else {
-                      localStorage.removeItem('moderation:autoApproveActivatedAt');
-                    }
-                    showToast(v ? 'success' : 'info', v ? 'تم تفعيل الموافقة التلقائية' : 'تم إيقاف الموافقة التلقائية');
-                    updateSystemSettings({ manual_approval: !v })
-                      .then(() => {
-                        showToast('success', 'تم تحديث إعدادات النظام');
-                      })
-                      .catch((err: any) => {
-                        showToast('error', 'فشل تحديث إعدادات النظام', String(err?.message || err));
-                      });
-                  }}
-                />
-                <span className="toggle-slider"></span>
-                <span className="toggle-status">{autoApprove ? 'مفعل' : 'مغلق'}</span>
-              </div>
-            </label>
-          </div>
+            {/* <label className="filter-label">القسم</label> */}
+            <div className="filters-row">
+              <ManagedSelect
+                options={categoryOptions.length ? categoryOptions : ALL_CATEGORIES_OPTIONS}
+                value={categoryFilter}
+                onChange={(v) => setCategoryFilter(v)}
+                placeholder={`كل الأقسام (${totalAdsCount})`}
+                getCount={getCategoryCount}
+                className="category-select-wide"
+              />
+              <label className="toggle-label compact">
+                <span className="toggle-text">الموافقة التلقائية على الإعلانات</span>
+                <div className="toggle-switch-container">
+                  <input
+                    type="checkbox"
+                    className="toggle-input"
+                    checked={autoApprove}
+                    onChange={(e) => {
+                      const v = e.target.checked;
+                      setAutoApprove(v);
+                      if (v) {
+                        localStorage.setItem('moderation:autoApproveActivatedAt', new Date().toISOString());
+                      } else {
+                        localStorage.removeItem('moderation:autoApproveActivatedAt');
+                      }
+                      showToast(v ? 'success' : 'info', v ? 'تم تفعيل الموافقة التلقائية' : 'تم إيقاف الموافقة التلقائية');
+                      updateSystemSettings({ manual_approval: !v })
+                        .then(() => {
+                          showToast('success', 'تم تحديث إعدادات النظام');
+                        })
+                        .catch((err: any) => {
+                          showToast('error', 'فشل تحديث إعدادات النظام', String(err?.message || err));
+                        });
+                    }}
+                  />
+                  <span className="toggle-slider"></span>
+                  <span className="toggle-status">{autoApprove ? 'مفعل' : 'مغلق'}</span>
+                </div>
+              </label>
+            </div>
             {/* </div> */}
           </div>
 
@@ -862,285 +871,285 @@ export default function ModerationPage() {
               </div>
             </div>
           ) : (
-          <>
-          <div className="ads-queue">
-            {visibleAds.map((ad) => (
-              <div 
-                key={ad.id} 
-                className={`ad-card ${selectedAd?.id === ad.id ? 'selected' : ''}`}
-                onClick={() => {
-                  // Check if it's mobile view
-                  if (window.innerWidth <= 968) {
-                    openMobileModal(ad);
-                  } else {
-                    setSelectedAd(ad);
-                  }
-                }}
-              >
-                <div className="ad-card-header">
-                  <div className="ad-status">
-                    {getStatusText(ad.status)}
-                  </div>
-                  <div className="ad-id">#{ad.id}</div>
-                </div>
+            <>
+              <div className="ads-queue">
+                {visibleAds.map((ad) => (
+                  <div
+                    key={ad.id}
+                    className={`ad-card ${selectedAd?.id === ad.id ? 'selected' : ''}`}
+                    onClick={() => {
+                      // Check if it's mobile view
+                      if (window.innerWidth <= 968) {
+                        openMobileModal(ad);
+                      } else {
+                        setSelectedAd(ad);
+                      }
+                    }}
+                  >
+                    <div className="ad-card-header">
+                      <div className="ad-status">
+                        {getStatusText(ad.status)}
+                      </div>
+                      <div className="ad-id">#{ad.id}</div>
+                    </div>
 
-                <div className="ad-card-content">
-                  <div className="ad-image-preview">
-                    {ad.images.length > 0 && (
-                      <Image 
-                        src={ad.images[0]} 
-                        alt={ad.title}
-                        width={80}
-                        height={60}
-                        className="preview-image"
+                    <div className="ad-card-content">
+                      <div className="ad-image-preview">
+                        {ad.images.length > 0 && (
+                          <Image
+                            src={ad.images[0]}
+                            alt={ad.title}
+                            width={80}
+                            height={60}
+                            className="preview-image"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openImageModal(ad.id, 0);
+                            }}
+                          />
+                        )}
+                        {ad.images.length > 1 && (
+                          <div className="image-count">+{ad.images.length - 1}</div>
+                        )}
+                      </div>
+
+                      <div className="ad-info">
+                        <h3 className="ad-title">{ad.source?.title || ad.title || ''}</h3>
+                        <p className="ad-category">{ad.source?.category_name || ad.category}</p>
+                        <p className="ad-price">{ad.source?.price ?? ''}</p>
+                        <p className="ad-governorate">{ad.source?.governorate ?? ''}</p>
+                        <p className="ad-city">{ad.source?.city ?? ''}</p>
+                        <p className="ad-time">⏰ {formatDateArShort(ad.source?.created_at || ad.submittedAt)}</p>
+                      </div>
+                    </div>
+
+                    <div className="ad-card-actions">
+                      <button
+                        className="action-btn approve-btn"
                         onClick={(e) => {
                           e.stopPropagation();
-                          openImageModal(ad.id, 0);
+                          handleAction(ad.id, 'approve');
                         }}
-                      />
-                    )}
-                    {ad.images.length > 1 && (
-                      <div className="image-count">+{ad.images.length - 1}</div>
-                    )}
+                      >
+                        ✓ موافقة
+                      </button>
+                      <button
+                        className="action-btn reject-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReasonModal('reject', ad.id);
+                        }}
+                      >
+                        ✗ رفض
+                      </button>
+                      <button
+                        className="action-btn modify-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditModal(ad);
+                        }}
+                      >
+                        ✏️ تعديل البيانات
+                      </button>
+                    </div>
                   </div>
-
-                  <div className="ad-info">
-                    <h3 className="ad-title">{ad.source?.title || ad.title || ''}</h3>
-                    <p className="ad-category">{ad.source?.category_name || ad.category}</p>
-                    <p className="ad-price">{ad.source?.price ?? ''}</p>
-                    <p className="ad-governorate">{ad.source?.governorate ?? ''}</p>
-                    <p className="ad-city">{ad.source?.city ?? ''}</p>
-                    <p className="ad-time">⏰ {formatDateArShort(ad.source?.created_at || ad.submittedAt)}</p>
-                  </div>
-                </div>
-
-                <div className="ad-card-actions">
-                  <button 
-                    className="action-btn approve-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAction(ad.id, 'approve');
-                    }}
-                  >
-                    ✓ موافقة
-                  </button>
-                  <button 
-                    className="action-btn reject-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openReasonModal('reject', ad.id);
-                    }}
-                  >
-                    ✗ رفض
-                  </button>
-                  <button 
-                    className="action-btn modify-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEditModal(ad);
-                    }}
-                  >
-                    ✏️ تعديل البيانات
-                  </button>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-          {renderPaginationButtons()}
-          </>
+              {renderPaginationButtons()}
+            </>
           )}
         </div>
 
         {visibleAds.length > 0 && (
-        <div className="details-pane">
-          {selectedAd ? (
-            <div className="ad-details">
-              <div className="details-header">
-                <h2>تفاصيل الإعلان</h2>
-                <div className="ad-status-large">
-                  {getStatusText(selectedAd.status)}
-                </div>
-              </div>
-
-              <div className="details-content">
-                <div className="detail-section">
-                  <h3>معلومات الإعلان</h3>
-                  <div className="detail-grid">
-                    <div className="detail-item"><label>المعرّف:</label><span>{selectedAd?.source?.id ?? '-'}</span></div>
-                    <div className="detail-item"><label>معرّف التصنيف:</label><span>{selectedAd?.source?.category_id ?? '-'}</span></div>
-                    <div className="detail-item"><label>المعرّف النصي:</label><span>{selectedAd?.source?.category || '-'}</span></div>
-                    <div className="detail-item"><label>اسم التصنيف:</label><span>{selectedAd?.source?.category_name || '-'}</span></div>
-                    <div className="detail-item"><label>السعر:</label><span>{selectedAd?.source?.price ?? '-'}</span></div>
-                    <div className="detail-item"><label>العملة:</label><span>{selectedAd?.source?.currency ?? '-'}</span></div>
-                    <div className="detail-item full-width"><label>الوصف:</label><span>{selectedAd?.source?.description || '-'}</span></div>
-                    <div className="detail-item"><label>المحافظة:</label><span>{selectedAd?.source?.governorate || '-'}</span></div>
-                    <div className="detail-item"><label>المدينة:</label><span>{selectedAd?.source?.city || '-'}</span></div>
-                    <div className="detail-item"><label>خط العرض:</label><span>{selectedAd?.source?.lat || '-'}</span></div>
-                    <div className="detail-item"><label>خط الطول:</label><span>{selectedAd?.source?.lng || '-'}</span></div>
-                    <div className="detail-item"><label>العنوان:</label><span>{selectedAd?.source?.address || '-'}</span></div>
-                    <div className="detail-item"><label>الحالة:</label><span>{getStatusText(normalizeStatus(selectedAd?.source?.status))}</span></div>
-                    <div className="detail-item"><label>نوع الخطة:</label><span>{formatPlanType(selectedAd?.source?.plan_type)}</span></div>
-                    <div className="detail-item"><label>عدد المشاهدات:</label><span>{selectedAd?.source?.views ?? 0}</span></div>
-                    <div className="detail-item"><label>الترتيب:</label><span>{selectedAd?.source?.rank ?? 0}</span></div>
-                    <div className="detail-item"><label>كود الدولة:</label><span>{formatCountryCode(selectedAd?.source?.country_code)}</span></div>
-                    <div className="detail-item"><label>تاريخ الإنشاء:</label><span>{formatDateAr(selectedAd?.source?.created_at)}</span></div>
-                    <div className="detail-item"><label>آخر تحديث:</label><span>{formatDateAr(selectedAd?.source?.updated_at)}</span></div>
-                    <div className="detail-item"><label>ينتهي في:</label><span>{formatDateAr(selectedAd?.source?.expire_at)}</span></div>
-                    <div className="detail-item"><label>مدفوع؟</label><span>{selectedAd?.source?.isPayment === true ? 'تم الدفع لهذا الاعلان' : selectedAd?.source?.isPayment === false ? 'لم يتم الدفع لهذا الاعلان' : '-'}</span></div>
-                    <div className="detail-item full-width"><label>تعليق الإدمن:</label><span>{selectedAd?.source?.admin_comment || '-'}</span></div>
+          <div className="details-pane">
+            {selectedAd ? (
+              <div className="ad-details">
+                <div className="details-header">
+                  <h2>تفاصيل الإعلان</h2>
+                  <div className="ad-status-large">
+                    {getStatusText(selectedAd.status)}
                   </div>
                 </div>
 
-                <div className="detail-section">
-                  <h3>بيانات المعلن</h3>
-                  <div className="detail-grid">
-                    <div className="detail-item">
-                      <label>رقم المعلن:</label>
-                      <span>{selectedAd?.source?.user?.id ?? '-'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>الاسم:</label>
-                      <span>{selectedAd?.source?.user?.name || 'غير متوفر'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>رقم الهاتف:</label>
-                      <span>{formatPhoneTrailingPlus(selectedAd?.source?.user?.phone, selectedAd?.source?.country_code)}</span>
+                <div className="details-content">
+                  <div className="detail-section">
+                    <h3>معلومات الإعلان</h3>
+                    <div className="detail-grid">
+                      <div className="detail-item"><label>المعرّف:</label><span>{selectedAd?.source?.id ?? '-'}</span></div>
+                      <div className="detail-item"><label>معرّف التصنيف:</label><span>{selectedAd?.source?.category_id ?? '-'}</span></div>
+                      <div className="detail-item"><label>المعرّف النصي:</label><span>{selectedAd?.source?.category || '-'}</span></div>
+                      <div className="detail-item"><label>اسم التصنيف:</label><span>{selectedAd?.source?.category_name || '-'}</span></div>
+                      <div className="detail-item"><label>السعر:</label><span>{selectedAd?.source?.price ?? '-'}</span></div>
+                      <div className="detail-item"><label>العملة:</label><span>{selectedAd?.source?.currency ?? '-'}</span></div>
+                      <div className="detail-item full-width"><label>الوصف:</label><span>{selectedAd?.source?.description || '-'}</span></div>
+                      <div className="detail-item"><label>المحافظة:</label><span>{selectedAd?.source?.governorate || '-'}</span></div>
+                      <div className="detail-item"><label>المدينة:</label><span>{selectedAd?.source?.city || '-'}</span></div>
+                      <div className="detail-item"><label>خط العرض:</label><span>{selectedAd?.source?.lat || '-'}</span></div>
+                      <div className="detail-item"><label>خط الطول:</label><span>{selectedAd?.source?.lng || '-'}</span></div>
+                      <div className="detail-item"><label>العنوان:</label><span>{selectedAd?.source?.address || '-'}</span></div>
+                      <div className="detail-item"><label>الحالة:</label><span>{getStatusText(normalizeStatus(selectedAd?.source?.status))}</span></div>
+                      <div className="detail-item"><label>نوع الخطة:</label><span>{formatPlanType(selectedAd?.source?.plan_type)}</span></div>
+                      <div className="detail-item"><label>عدد المشاهدات:</label><span>{selectedAd?.source?.views ?? 0}</span></div>
+                      <div className="detail-item"><label>الترتيب:</label><span>{selectedAd?.source?.rank ?? 0}</span></div>
+                      <div className="detail-item"><label>كود الدولة:</label><span>{formatCountryCode(selectedAd?.source?.country_code)}</span></div>
+                      <div className="detail-item"><label>تاريخ الإنشاء:</label><span>{formatDateAr(selectedAd?.source?.created_at)}</span></div>
+                      <div className="detail-item"><label>آخر تحديث:</label><span>{formatDateAr(selectedAd?.source?.updated_at)}</span></div>
+                      <div className="detail-item"><label>ينتهي في:</label><span>{formatDateAr(selectedAd?.source?.expire_at)}</span></div>
+                      <div className="detail-item"><label>مدفوع؟</label><span>{selectedAd?.source?.isPayment === true ? 'تم الدفع لهذا الاعلان' : selectedAd?.source?.isPayment === false ? 'لم يتم الدفع لهذا الاعلان' : '-'}</span></div>
+                      <div className="detail-item full-width"><label>تعليق الإدمن:</label><span>{selectedAd?.source?.admin_comment || '-'}</span></div>
                     </div>
                   </div>
-                </div>
 
-                <div className="detail-section">
-                  <h3>معلومات التواصل</h3>
-                  <div className="detail-grid">
-                    <div className="detail-item">
-                      <label>الهاتف للتواصل:</label>
-                      <span>{formatPhoneTrailingPlus(selectedAd?.source?.contact_phone, selectedAd?.source?.country_code)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>واتساب:</label>
-                      <span>{formatPhoneTrailingPlus(selectedAd?.source?.whatsapp_phone, selectedAd?.source?.country_code)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <label>تاريخ الإنشاء:</label>
-                      <span>{selectedAd.source?.created_at ? formatDateAr(selectedAd.source.created_at) : selectedAd.submittedAt}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="detail-section">
-                  <h3>خصائص الإعلان</h3>
-                  <div className="detail-grid">
-                    {selectedAd.source?.attributes && Object.entries(selectedAd.source.attributes).map(([key, val]) => (
-                      <div key={key} className="detail-item">
-                        <label>{translateAttributeKey(key)}:</label>
-                        <span>{String(val)}</span>
+                  <div className="detail-section">
+                    <h3>بيانات المعلن</h3>
+                    <div className="detail-grid">
+                      <div className="detail-item">
+                        <label>رقم المعلن:</label>
+                        <span>{selectedAd?.source?.user?.id ?? '-'}</span>
                       </div>
-                    ))}
-                    {/* {selectedAd?.source?.make_id && (
+                      <div className="detail-item">
+                        <label>الاسم:</label>
+                        <span>{selectedAd?.source?.user?.name || 'غير متوفر'}</span>
+                      </div>
+                      <div className="detail-item">
+                        <label>رقم الهاتف:</label>
+                        <span>{formatPhoneTrailingPlus(selectedAd?.source?.user?.phone, selectedAd?.source?.country_code)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="detail-section">
+                    <h3>معلومات التواصل</h3>
+                    <div className="detail-grid">
+                      <div className="detail-item">
+                        <label>الهاتف للتواصل:</label>
+                        <span>{formatPhoneTrailingPlus(selectedAd?.source?.contact_phone, selectedAd?.source?.country_code)}</span>
+                      </div>
+                      <div className="detail-item">
+                        <label>واتساب:</label>
+                        <span>{formatPhoneTrailingPlus(selectedAd?.source?.whatsapp_phone, selectedAd?.source?.country_code)}</span>
+                      </div>
+                      <div className="detail-item">
+                        <label>تاريخ الإنشاء:</label>
+                        <span>{selectedAd.source?.created_at ? formatDateAr(selectedAd.source.created_at) : selectedAd.submittedAt}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="detail-section">
+                    <h3>خصائص الإعلان</h3>
+                    <div className="detail-grid">
+                      {selectedAd.source?.attributes && Object.entries(selectedAd.source.attributes).map(([key, val]) => (
+                        <div key={key} className="detail-item">
+                          <label>{translateAttributeKey(key)}:</label>
+                          <span>{String(val)}</span>
+                        </div>
+                      ))}
+                      {/* {selectedAd?.source?.make_id && (
                       <div className="detail-item"><label>معرّف الماركة:</label><span>{selectedAd?.source?.make_id}</span></div>
                     )} */}
-                    {selectedAd?.source?.make && (
-                      <div className="detail-item"><label>الماركة:</label><span>{selectedAd?.source?.make}</span></div>
-                    )}
-                    {/* {selectedAd?.source?.model_id && (
+                      {selectedAd?.source?.make && (
+                        <div className="detail-item"><label>الماركة:</label><span>{selectedAd?.source?.make}</span></div>
+                      )}
+                      {/* {selectedAd?.source?.model_id && (
                       <div className="detail-item"><label>معرّف الموديل:</label><span>{selectedAd?.source?.model_id}</span></div>
                     )} */}
-                    {selectedAd?.source?.model && (
-                      <div className="detail-item"><label>الموديل:</label><span>{selectedAd?.source?.model}</span></div>
-                    )}
+                      {selectedAd?.source?.model && (
+                        <div className="detail-item"><label>الموديل:</label><span>{selectedAd?.source?.model}</span></div>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="detail-section">
-                  <h3>الصور ({selectedAd.images.length})</h3>
-                  {(() => {
-                    const imgs = selectedAd.images || [];
-                    const main = selectedAd.source?.main_image_url || imgs[0] || '';
-                    const mainIndex = Math.max(0, imgs.indexOf(main));
-                    const secondary = imgs.filter((i) => i && i !== main);
-                    return (
-                      <div className="images-gallery">
-                        <div className="image-container main">
-                          {main && <div className="image-badge main">الغلاف</div>}
-                          <Image 
-                            src={main || '/nas-masr.png'} 
-                            alt={'الغلاف'}
-                            width={360}
-                            height={270}
-                            className="detail-image main"
-                            onClick={() => openImageModal(selectedAd.id, mainIndex)}
-                          />
-                          <div className="image-actions">
-                            <button className="image-action-btn zoom-btn" onClick={() => openImageModal(selectedAd.id, mainIndex)}>عرض</button>
-                            <button className="image-action-btn delete-btn" onClick={() => deleteAdImage(selectedAd.id, mainIndex)}>حذف</button>
+                  <div className="detail-section">
+                    <h3>الصور ({selectedAd.images.length})</h3>
+                    {(() => {
+                      const imgs = selectedAd.images || [];
+                      const main = selectedAd.source?.main_image_url || imgs[0] || '';
+                      const mainIndex = Math.max(0, imgs.indexOf(main));
+                      const secondary = imgs.filter((i) => i && i !== main);
+                      return (
+                        <div className="images-gallery">
+                          <div className="image-container main">
+                            {main && <div className="image-badge main">الغلاف</div>}
+                            <Image
+                              src={main || '/nas-masr.png'}
+                              alt={'الغلاف'}
+                              width={360}
+                              height={270}
+                              className="detail-image main"
+                              onClick={() => openImageModal(selectedAd.id, mainIndex)}
+                            />
+                            <div className="image-actions">
+                              <button className="image-action-btn zoom-btn" onClick={() => openImageModal(selectedAd.id, mainIndex)}>عرض</button>
+                              <button className="image-action-btn delete-btn" onClick={() => deleteAdImage(selectedAd.id, mainIndex)}>حذف</button>
+                            </div>
+                          </div>
+                          <div className="thumbs-grid">
+                            {secondary.map((image) => {
+                              const idx = imgs.indexOf(image);
+                              return (
+                                <div key={image} className="image-container thumb">
+                                  <div className="image-badge secondary">صورة فرعية</div>
+                                  <Image
+                                    src={image}
+                                    alt={'صورة فرعية'}
+                                    width={140}
+                                    height={105}
+                                    className="detail-image"
+                                    onClick={() => openImageModal(selectedAd.id, idx)}
+                                  />
+                                  <div className="image-actions">
+                                    <button className="image-action-btn zoom-btn" onClick={() => openImageModal(selectedAd.id, idx)}>عرض</button>
+                                    <button className="image-action-btn delete-btn" onClick={() => deleteAdImage(selectedAd.id, idx)}>حذف</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-                        <div className="thumbs-grid">
-                          {secondary.map((image) => {
-                            const idx = imgs.indexOf(image);
-                            return (
-                              <div key={image} className="image-container thumb">
-                                <div className="image-badge secondary">صورة فرعية</div>
-                                <Image 
-                                  src={image} 
-                                  alt={'صورة فرعية'}
-                                  width={140}
-                                  height={105}
-                                  className="detail-image"
-                                  onClick={() => openImageModal(selectedAd.id, idx)}
-                                />
-                                <div className="image-actions">
-                                  <button className="image-action-btn zoom-btn" onClick={() => openImageModal(selectedAd.id, idx)}>عرض</button>
-                                  <button className="image-action-btn delete-btn" onClick={() => deleteAdImage(selectedAd.id, idx)}>حذف</button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  
-                </div>
+                      );
+                    })()}
 
-                <div className="detail-section">
-                  <h3>الباقات والدفع</h3>
-                  <div className="quick-tools">
-                    <button className="tool-btn">💼 نوع الخطة: {formatPlanType(selectedAd.source?.plan_type)}</button>
-                    <button className="tool-btn">💳 حالة الدفع: {selectedAd.source?.isPayment ? 'تم الدفع' : 'لم يتم الدفع لهذا الاعلان'}</button>
-                    <button className="tool-btn">💼 طريقة النشر: {formatPublishVia(selectedAd.source?.publish_via)}</button>
+                  </div>
+
+                  <div className="detail-section">
+                    <h3>الباقات والدفع</h3>
+                    <div className="quick-tools">
+                      <button className="tool-btn">💼 نوع الخطة: {formatPlanType(selectedAd.source?.plan_type)}</button>
+                      <button className="tool-btn">💳 حالة الدفع: {selectedAd.source?.isPayment ? 'تم الدفع' : 'لم يتم الدفع لهذا الاعلان'}</button>
+                      <button className="tool-btn">💼 طريقة النشر: {formatPublishVia(selectedAd.source?.publish_via)}</button>
+                    </div>
+                  </div>
+
+                  <div className="detail-actions">
+                    <button
+                      className="detail-action-btn approve-btn"
+                      onClick={() => handleAction(selectedAd.id, 'approve')}
+                    >
+                      موافقة على الإعلان
+                    </button>
+                    <button
+                      className="detail-action-btn reject-btn"
+                      onClick={() => openReasonModal('reject', selectedAd.id)}
+                    >
+                      رفض الإعلان
+                    </button>
+                    <button
+                      className="detail-action-btn modify-btn"
+                      onClick={() => openEditModal(selectedAd)}
+                    >
+                      تعديل البيانات
+                    </button>
                   </div>
                 </div>
-
-                <div className="detail-actions">
-                  <button 
-                    className="detail-action-btn approve-btn"
-                    onClick={() => handleAction(selectedAd.id, 'approve')}
-                  >
-                    موافقة على الإعلان
-                  </button>
-                  <button 
-                    className="detail-action-btn reject-btn"
-                    onClick={() => openReasonModal('reject', selectedAd.id)}
-                  >
-                     رفض الإعلان
-                  </button>
-                  <button 
-                    className="detail-action-btn modify-btn"
-                    onClick={() => openEditModal(selectedAd)}
-                  >
-                     تعديل البيانات
-                  </button>
-                </div>
               </div>
-            </div>
-          ) : (
-            <div className="no-selection">
-              <div className="no-selection-icon">📋</div>
-              <h3>اختر إعلاناً للمراجعة</h3>
-              <p>انقر على أي إعلان من القائمة لعرض تفاصيله</p>
-            </div>
-          )}
-        </div>
+            ) : (
+              <div className="no-selection">
+                <div className="no-selection-icon">📋</div>
+                <h3>اختر إعلاناً للمراجعة</h3>
+                <p>انقر على أي إعلان من القائمة لعرض تفاصيله</p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -1151,8 +1160,8 @@ export default function ModerationPage() {
             <button className="modal-close" onClick={closeImageModal}>✕</button>
             <div className="gallery-main">
               <button className="gallery-nav prev" onClick={prevImage}>‹</button>
-              <Image 
-                src={(ads.find(a => a.id === imageModalAdId)?.images[imageModalIndex]) || '/nas-masr.png'} 
+              <Image
+                src={(ads.find(a => a.id === imageModalAdId)?.images[imageModalIndex]) || '/nas-masr.png'}
                 alt={`صورة ${imageModalIndex + 1}`}
                 width={800}
                 height={600}
@@ -1162,13 +1171,13 @@ export default function ModerationPage() {
             </div>
             <div className="gallery-thumbs">
               {(ads.find(a => a.id === imageModalAdId)?.images || []).map((img, idx) => (
-                <button 
+                <button
                   key={idx}
                   className={`thumb ${idx === imageModalIndex ? 'active' : ''}`}
                   onClick={() => setImageModalIndex(idx)}
                   aria-label={`صورة ${idx + 1}`}
                 >
-                  <Image src={img} alt={`صورة ${idx + 1}`} width={100} height={75}/>
+                  <Image src={img} alt={`صورة ${idx + 1}`} width={100} height={75} />
                 </button>
               ))}
             </div>
@@ -1186,12 +1195,12 @@ export default function ModerationPage() {
               </h3>
               <button className="modal-close" onClick={closeReasonModal}>✕</button>
             </div>
-            
+
             <div className="modal-content">
               <div className="reason-templates">
                 <h4>أسباب جاهزة:</h4>
                 {rejectionReasons.map((reason, index) => (
-                  <button 
+                  <button
                     key={index}
                     className="reason-btn"
                     onClick={() => setCustomReason(reason)}
@@ -1200,10 +1209,10 @@ export default function ModerationPage() {
                   </button>
                 ))}
               </div>
-              
+
               <div className="custom-reason">
                 <label>سبب مخصص:</label>
-                <textarea 
+                <textarea
                   value={customReason}
                   onChange={(e) => setCustomReason(e.target.value)}
                   placeholder="اكتب السبب هنا..."
@@ -1211,15 +1220,15 @@ export default function ModerationPage() {
                 />
               </div>
             </div>
-            
+
             <div className="modal-actions">
-              <button 
+              <button
                 className="confirm-btn"
                 onClick={() => reasonTargetAdId && handleAction(reasonTargetAdId, actionType, customReason)}
               >
                 تأكيد
               </button>
-              <button 
+              <button
                 className="cancel-btn"
                 onClick={closeReasonModal}
               >
@@ -1229,7 +1238,7 @@ export default function ModerationPage() {
           </div>
         </div>
       )}
-      
+
       {/* Edit Modal */}
       {showEditModal && editTargetAdId && (
         <div className="modal-overlay" onClick={closeEditModal}>
@@ -1251,7 +1260,7 @@ export default function ModerationPage() {
                 </div> */}
                 <div className="form-group">
                   <label>الوصف</label>
-                  <textarea 
+                  <textarea
                     rows={4}
                     value={editForm.description}
                     onChange={(e) => handleEditChange('description', e.target.value)}
@@ -1259,8 +1268,8 @@ export default function ModerationPage() {
                 </div>
                 <div className="form-group">
                   <label>التصنيف</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={editForm.category}
                     onChange={(e) => handleEditChange('category', e.target.value)}
                   />
@@ -1268,16 +1277,16 @@ export default function ModerationPage() {
                 <div className="form-grid">
                   <div className="form-group">
                     <label>السعر</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={editForm.price}
                       onChange={(e) => handleEditChange('price', e.target.value)}
                     />
                   </div>
                   <div className="form-group">
                     <label>العملة</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={editForm.currency}
                       onChange={(e) => handleEditChange('currency', e.target.value)}
                     />
@@ -1317,7 +1326,7 @@ export default function ModerationPage() {
                 <div className="form-grid">
                   <div className="form-group">
                     <label>الحالة</label>
-                    <ManagedSelect 
+                    <ManagedSelect
                       options={statusOptions}
                       value={editForm.status}
                       onChange={(v) => handleEditChange('status', v)}
@@ -1327,7 +1336,7 @@ export default function ModerationPage() {
                   </div>
                   <div className="form-group">
                     <label>نوع الخطة</label>
-                    <ManagedSelect 
+                    <ManagedSelect
                       options={planTypeOptions}
                       value={editForm.plan_type}
                       onChange={(v) => handleEditChange('plan_type', v)}
@@ -1343,7 +1352,7 @@ export default function ModerationPage() {
                   </div>
                   <div className="form-group">
                     <label>حالة الدفع</label>
-                    <ManagedSelect 
+                    <ManagedSelect
                       options={paymentOptions}
                       value={editForm.isPayment ? '1' : '0'}
                       onChange={(v) => handleEditChange('isPayment', v === '1')}
@@ -1404,11 +1413,11 @@ export default function ModerationPage() {
                 <div className="form-group">
                   <label>الغلاف</label>
                   <div className="edit-image-item main-cover-edit" style={{ marginBottom: '10px' }}>
-                    <Image 
-                      src={editForm.main_image_file ? URL.createObjectURL(editForm.main_image_file) : (editForm.main_image_url || '/nas-masr.png')} 
-                      alt="الغلاف" 
-                      width={120} 
-                      height={90} 
+                    <Image
+                      src={editForm.main_image_file ? URL.createObjectURL(editForm.main_image_file) : (editForm.main_image_url || '/nas-masr.png')}
+                      alt="الغلاف"
+                      width={120}
+                      height={90}
                       className="cover-preview"
                       style={{ objectFit: 'cover', borderRadius: '4px', border: '1px solid #ddd' }}
                     />
@@ -1422,14 +1431,14 @@ export default function ModerationPage() {
                   <div className="edit-images">
                     {editForm.images.map((img, idx) => (
                       <div key={idx} className="edit-image-item">
-                        <Image src={typeof img === 'string' ? img : URL.createObjectURL(img)} alt={`صورة ${idx+1}`} width={80} height={60} />
+                        <Image src={typeof img === 'string' ? img : URL.createObjectURL(img)} alt={`صورة ${idx + 1}`} width={80} height={60} />
                         <button className="image-action-btn edit-btn" onClick={() => handleImageEditClick(idx)}>تعديل</button>
                       </div>
                     ))}
                   </div>
                   <div className="add-image-row">
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       placeholder="مسار الصورة (URL أو /public)"
                       value={newImageUrl}
                       onChange={(e) => setNewImageUrl(e.target.value)}
@@ -1437,11 +1446,11 @@ export default function ModerationPage() {
                     <input type="file" accept="image/*" onChange={(e) => setNewImageFile(e.target.files?.[0] || null)} />
                     <button className="tool-btn" onClick={addImageToEditForm}>إضافة صورة</button>
                   </div>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    style={{ display: 'none' }} 
-                    accept="image/*" 
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    style={{ display: 'none' }}
+                    accept="image/*"
                     onChange={handleFileChange}
                   />
                 </div>
@@ -1486,7 +1495,7 @@ export default function ModerationPage() {
               <div className="mobile-ad-status">
                 {getStatusText(selectedAd.status)}
               </div>
-              
+
               <div className="mobile-detail-section">
                 <h4>معلومات الإعلان</h4>
                 <div className="mobile-detail-grid">
@@ -1536,8 +1545,8 @@ export default function ModerationPage() {
                 <div className="mobile-images-grid">
                   {selectedAd.images.map((image, index) => (
                     <div key={index} className="mobile-image-container">
-                      <Image 
-                        src={image} 
+                      <Image
+                        src={image}
                         alt={`صورة ${index + 1}`}
                         width={100}
                         height={75}
@@ -1550,7 +1559,7 @@ export default function ModerationPage() {
               </div>
 
               <div className="mobile-detail-actions">
-                <button 
+                <button
                   className="mobile-action-btn approve-btn"
                   onClick={() => {
                     handleAction(selectedAd.id, 'approve');
@@ -1559,7 +1568,7 @@ export default function ModerationPage() {
                 >
                   ✓ موافقة
                 </button>
-                <button 
+                <button
                   className="mobile-action-btn reject-btn"
                   onClick={() => {
                     openReasonModal('reject', selectedAd.id);
@@ -1568,7 +1577,7 @@ export default function ModerationPage() {
                 >
                   ✗ رفض
                 </button>
-                <button 
+                <button
                   className="mobile-action-btn modify-btn"
                   onClick={() => {
                     openEditModal(selectedAd);

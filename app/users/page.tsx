@@ -4,14 +4,16 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import ManagedSelect from '@/components/ManagedSelect';
 import { CATEGORY_LABELS_AR } from '@/constants/categories';
-import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured } from '@/services/users';
+import { User as UserIcon, Phone, MapPin, ExternalLink, Users, Search, RefreshCw } from 'lucide-react';
+import { fetchUsersSummary, fetchUsersSummaryPage, updateUser, toggleUserBlock, deleteUser, createUser, changeUserPassword, createUserOtp, fetchUserListings, fetchCategories, assignUserPackage, setUserFeaturedCategories, disableUserFeatured, fetchDelegateClients } from '@/services/users';
 import { CATEGORY_SLUGS, CategorySlug } from '@/models/makes';
-import { UsersMeta, AssignUserPackagePayload, UsersSummaryResponse } from '@/models/users';
+import { UsersMeta, AssignUserPackagePayload, UsersSummaryResponse, DelegateClient } from '@/models/users';
 
 interface User {
   id: string;
   name: string;
   phone: string;
+  address?: string | null;
   userCode: string;
   status: 'active' | 'banned';
   registrationDate: string;
@@ -125,13 +127,14 @@ export default function UsersPage() {
           id: String(u.id),
           name: u.name ?? '',
           phone: u.phone,
-          userCode: String(u.id),
+          address: u.address,
+          userCode: u.user_code,
           status: u.status === 'active' ? 'active' : 'banned',
           registrationDate: u.registered_at,
           adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
           role: u.role,
           lastLogin: u.registered_at,
-          phoneVerified: false,
+          phoneVerified: u.phone_verified,
         } as User));
         setUsers(mapped);
         setUsersMeta(resp.meta);
@@ -152,7 +155,7 @@ export default function UsersPage() {
         openPackagesModal(target);
         localStorage.removeItem('openPackagesForUserId');
       }
-    } catch {}
+    } catch { }
   }, [users]);
 
   useEffect(() => {
@@ -223,12 +226,12 @@ export default function UsersPage() {
   const [packagesForm, setPackagesForm] = useState<UserPackage>({
     featuredAds: 0,
     featuredDays: 0,
-    startFeaturedNow: false,
+    startFeaturedNow: true,
     featuredStartDate: null,
     featuredExpiryDate: null,
     standardAds: 0,
     standardDays: 0,
-    startStandardNow: false,
+    startStandardNow: true,
     standardStartDate: null,
     standardExpiryDate: null,
   });
@@ -242,6 +245,12 @@ export default function UsersPage() {
   const [isFavoritesModalOpen, setIsFavoritesModalOpen] = useState(false);
   const [selectedUserForFavorites, setSelectedUserForFavorites] = useState<User | null>(null);
   const [favoriteSlugs, setFavoriteSlugs] = useState<string[]>([]);
+
+  // Delegate Clients modal state
+  const [isDelegateClientsModalOpen, setIsDelegateClientsModalOpen] = useState(false);
+  const [delegateClients, setDelegateClients] = useState<DelegateClient[]>([]);
+  const [isFetchingClients, setIsFetchingClients] = useState(false);
+  const [selectedDelegateForClients, setSelectedDelegateForClients] = useState<User | null>(null);
 
   const openAdDetailsModal = (ad: AdItem) => {
     setAdInModal(ad);
@@ -271,7 +280,20 @@ export default function UsersPage() {
   const copyVerificationCode = async () => {
     if (!verificationCode) return;
     try {
-      await navigator.clipboard.writeText(verificationCode);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(verificationCode);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = verificationCode;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
       showToast('تم نسخ كود التحقق بنجاح', 'success');
     } catch (e) {
       showToast('تعذر النسخ تلقائيًا، يرجى النسخ يدويًا', 'warning');
@@ -414,7 +436,8 @@ export default function UsersPage() {
         id: String(u.id),
         name: u.name ?? '',
         phone: u.phone,
-        userCode: String(u.id),
+        address: u.address,
+        userCode: u.user_code,
         status: u.status === 'active' ? 'active' : 'banned',
         registrationDate: u.registered_at,
         adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
@@ -489,10 +512,10 @@ export default function UsersPage() {
   const filteredAds = selectedCategory === 'all'
     ? ads
     : ads.filter(
-        (ad) =>
-          ad.categorySlug === selectedCategory ||
-          ad.category === (CATEGORY_LABELS_AR[selectedCategory] ?? selectedCategory)
-      );
+      (ad) =>
+        ad.categorySlug === selectedCategory ||
+        ad.category === (CATEGORY_LABELS_AR[selectedCategory] ?? selectedCategory)
+    );
   const filteredUsers = users
     .filter((user) => {
       if (roleFilter === 'users') return user.role === 'user';
@@ -571,7 +594,7 @@ export default function UsersPage() {
           adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
           role: u.role,
           lastLogin: u.registered_at,
-          phoneVerified: false,
+          phoneVerified: u.phone_verified,
         } as User));
         const last = Math.max(1, Number(first.meta?.last_page || 1));
         if (last > 1) {
@@ -591,7 +614,7 @@ export default function UsersPage() {
               adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
               role: u.role,
               lastLogin: u.registered_at,
-              phoneVerified: false,
+              phoneVerified: u.phone_verified,
             } as User));
             aggregated = aggregated.concat(mapped);
           });
@@ -693,12 +716,12 @@ export default function UsersPage() {
           user.package ?? {
             featuredAds: 0,
             featuredDays: 0,
-            startFeaturedNow: false,
+            startFeaturedNow: true,
             featuredStartDate: null,
             featuredExpiryDate: null,
             standardAds: 0,
             standardDays: 0,
-            startStandardNow: false,
+            startStandardNow: true,
             standardStartDate: null,
             standardExpiryDate: null,
           }
@@ -709,12 +732,12 @@ export default function UsersPage() {
         user.package ?? {
           featuredAds: 0,
           featuredDays: 0,
-          startFeaturedNow: false,
+          startFeaturedNow: true,
           featuredStartDate: null,
           featuredExpiryDate: null,
           standardAds: 0,
           standardDays: 0,
-          startStandardNow: false,
+          startStandardNow: true,
           standardStartDate: null,
           standardExpiryDate: null,
         }
@@ -740,7 +763,7 @@ export default function UsersPage() {
         standard_active: Boolean(packagesForm.startStandardNow),
       };
       localStorage.setItem('userPackageData:' + id, JSON.stringify(payload));
-    } catch {}
+    } catch { }
   };
 
   const closePackagesModal = () => {
@@ -762,16 +785,18 @@ export default function UsersPage() {
         standard_ads: Number(packagesForm.standardAds) || 0,
         standard_days: Number(packagesForm.standardDays) || 0,
       };
+
+      // Force start_now even if not explicitly checked, or rely on form
       if (packagesForm.startFeaturedNow) payload.start_featured_now = true;
       if (packagesForm.startStandardNow) payload.start_standard_now = true;
 
-      if (packagesForm.featuredStartDate) payload.featured_start_date = new Date(packagesForm.featuredStartDate).toISOString();
-      if (packagesForm.featuredExpiryDate) payload.featured_expire_date = new Date(packagesForm.featuredExpiryDate).toISOString();
-      if (packagesForm.standardStartDate) payload.standard_start_date = new Date(packagesForm.standardStartDate).toISOString();
-      if (packagesForm.standardExpiryDate) payload.standard_expire_date = new Date(packagesForm.standardExpiryDate).toISOString();
+      // We don't need to send explicit dates if we are using "Days" and "Start Now"
+      // But if they are fixed, let's keep them optional or remove them
+      // In this case, we prefer the backend to calculate the date from featured_days
+
       const resp = await assignUserPackage(payload);
       const d = resp.data;
-      try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch {}
+      try { localStorage.setItem('userPackageData:' + selectedUserForPackages.id, JSON.stringify(d)); } catch { }
       const updatedUser = {
         ...selectedUserForPackages,
         package: {
@@ -794,10 +819,8 @@ export default function UsersPage() {
       setIsPackagesModalOpen(false);
       setSelectedUserForPackages(null);
       const idText = typeof d.id === 'number' ? String(d.id) : '';
-      const daysText = typeof d.standard_days === 'number' ? String(d.standard_days) : '';
-      const adsText = typeof d.standard_ads === 'number' ? String(d.standard_ads) : '';
-      const info = idText || daysText || adsText ? ` | ID: ${idText} | الأيام: ${daysText} | الإعلانات: ${adsText}` : '';
-      showToast((resp.message || 'تم تحديث الباقة بنجاح') + info, 'success');
+      const daysText = `${d.featured_days || 0} مميزة | ${d.standard_days || 0} ستاندرد`;
+      showToast((resp.message || 'تم تحديث الباقة بنجاح') + ` | ${daysText}`, 'success');
     } catch (e) {
       showToast('تعذر حفظ الباقة للمستخدم', 'error');
     }
@@ -916,7 +939,8 @@ export default function UsersPage() {
         id: String(u.id),
         name: u.name ?? '',
         phone: u.phone,
-        userCode: String(u.id),
+        address: u.address,
+        userCode: u.user_code,
         status: u.status === 'active' ? 'active' : 'banned',
         registrationDate: u.registered_at,
         adsCount: typeof u.listings_count === 'number' ? u.listings_count : 0,
@@ -939,38 +963,99 @@ export default function UsersPage() {
     showToast(`تم إرسال رابط إعادة تعيين كلمة السر للمستخدم ${user?.name}`, 'success');
   };
 
-  const handleChangePassword = (userId: string) => {
+  const handleChangePassword = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (!user) {
       showToast('تعذر العثور على المستخدم', 'error');
       return;
     }
 
-    const newPassword = '123456789';
+    const newPassword = '123456';
 
-    setUsers(users.map(u =>
-      u.id === userId
-        ? { ...u, lastLogin: new Date().toISOString().split('T')[0] }
-        : u
-    ));
-
-    const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
-    if (!phoneNormalized) {
-      showToast('رقم هاتف المستخدم غير صالح لإرسال واتساب', 'warning');
-      return;
+    // 1. Copy password to clipboard IMMEDIATELY to preserve user gesture context
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(newPassword);
+      } else {
+        // Fallback for non-secure context (HTTP)
+        const textArea = document.createElement("textarea");
+        textArea.value = newPassword;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+    } catch (err) {
+      console.warn('Initial clipboard copy failed:', err);
     }
-
-    const message = encodeURIComponent(
-      `مرحبًا ${user.name}، تم تغيير كلمة السر الخاصة بحسابك إلى: ${newPassword}.\nيرجى تسجيل الدخول وتغييرها بعد أول دخول.\nفريق ناس مصر`
-    );
-    const waUrl = `https://wa.me/${phoneNormalized}?text=${message}`;
 
     try {
+      // 2. Call Backend API to reset password to '123456'
+      const response = await changeUserPassword(userId);
+
+      // 3. Update local state
+      setUsers(users.map(u =>
+        u.id === userId
+          ? { ...u, lastLogin: new Date().toISOString().split('T')[0] }
+          : u
+      ));
+
+      // 4. Prepare WhatsApp Message
+      const phoneNormalized = user.phone.replace(/[^+\d]/g, '').replace('+', '');
+      if (!phoneNormalized) {
+        showToast('تم تغيير كلمة السر ونسخها، لكن رقم الهاتف غير صالح لإرسال واتساب', 'warning');
+        return;
+      }
+
+      // Use the exact message from the backend
+      const messageContent = response.message || `مرحبًا ${user.name}، تم تغيير كلمة السر الخاصة بحسابك إلى: ${newPassword}.\nيرجى تسجيل الدخول وتغييرها بعد أول دخول.\nفريق ناس مصر`;
+      const waUrl = `https://wa.me/${phoneNormalized}?text=${encodeURIComponent(messageContent)}`;
+
+      // 5. Open WhatsApp
       window.open(waUrl, '_blank');
-      showToast(`تم تغيير كلمة السر وإرسالها عبر واتساب للمستخدم ${user.name}`, 'success');
-    } catch (e) {
-      showToast('تم تغيير كلمة السر، لكن تعذر فتح واتساب', 'warning');
+      showToast(`تم تغيير كلمة السر ونسخها (123456) وإرسالها عبر واتساب للمستخدم ${user.name}`, 'success');
+
+    } catch (e: any) {
+      console.error('Change password failed:', e);
+      showToast(e.message || 'تعذر تغيير كلمة السر للمستخدم، يرجى المحاولة لاحقاً', 'error');
     }
+  };
+
+  const handleOpenDelegateClients = async (user: User) => {
+    setSelectedDelegateForClients(user);
+    setIsDelegateClientsModalOpen(true);
+    setIsFetchingClients(true);
+    setDelegateClients([]);
+    try {
+      const response = await fetchDelegateClients(user.id);
+      setDelegateClients(response.data || []);
+    } catch (e: any) {
+      showToast(e.message || 'تعذر جلب قائمة عملاء المندوب', 'error');
+    } finally {
+      setIsFetchingClients(false);
+    }
+  };
+
+  const handleViewClientProfile = (client: DelegateClient) => {
+    const userToView: User = {
+      id: String(client.id),
+      name: client.name || 'مستخدِم بدون اسم',
+      phone: client.phone,
+      address: client.address,
+      userCode: client.user_code,
+      status: client.status === 'banned' || client.status === 'blocked' ? 'banned' : 'active',
+      registrationDate: client.registered_at,
+      adsCount: client.listings_count,
+      role: client.role,
+      lastLogin: '',
+      phoneVerified: client.phone_verified,
+    };
+    setIsDelegateClientsModalOpen(false);
+    handleViewProfile(userToView);
   };
 
   const handleSetPIN = async (userId: string) => {
@@ -1016,7 +1101,7 @@ export default function UsersPage() {
   const getPageNumbers = () => {
     const pages = [];
     const maxVisiblePages = 5;
-    
+
     if (totalPages <= maxVisiblePages) {
       for (let i = 1; i <= totalPages; i++) {
         pages.push(i);
@@ -1024,22 +1109,22 @@ export default function UsersPage() {
     } else {
       const startPage = Math.max(1, currentPage - 2);
       const endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-      
+
       if (startPage > 1) {
         pages.push(1);
         if (startPage > 2) pages.push('...');
       }
-      
+
       for (let i = startPage; i <= endPage; i++) {
         pages.push(i);
       }
-      
+
       if (endPage < totalPages) {
         if (endPage < totalPages - 1) pages.push('...');
         pages.push(totalPages);
       }
     }
-    
+
     return pages;
   };
 
@@ -1053,7 +1138,7 @@ export default function UsersPage() {
     const rows = data.map(u => ({
       'الاسم': u.name,
       'رقم الهاتف': u.phone,
-      'كود المستخدم': u.userCode,
+      'كود المندوب': u.userCode,
       'الحالة': u.status === 'active' ? 'نشط' : 'محظور',
       'تاريخ التسجيل': u.registrationDate,
       // 'عدد الإعلانات': u.adsCount,
@@ -1079,26 +1164,26 @@ export default function UsersPage() {
       <div className="users-page">
         <div className="users-header">
           <div className="header-content">
-            <button 
+            <button
               className="back-btn"
               onClick={() => setShowUserProfile(false)}
             >
               ← العودة للقائمة
             </button>
             <h1>ملف المستخدم: {selectedUser.name}</h1>
-            <p>كود المستخدم: {selectedUser.userCode}</p>
+            <p>كود المندوب: {selectedUser.userCode}</p>
           </div>
         </div>
 
         <div className="user-profile-container">
           <div className="profile-tabs">
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`}
               onClick={() => setActiveTab('data')}
             >
-              البيانات 
+              البيانات
             </button>
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'ads' ? 'active' : ''}`}
               onClick={() => setActiveTab('ads')}
             >
@@ -1140,28 +1225,28 @@ export default function UsersPage() {
                   )}
                 </div>
                 <div className="data-grid">
-              <div className="data-item">
-                <label>الاسم الكامل:</label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={editForm?.name ?? ''}
-                    onChange={(e) =>
-                      setEditForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
-                    }
-                    className="input"
-                  />
-                ) : (
-                  <span>
-                    {selectedUser.name}
-                    {selectedUser.phoneVerified && (
-                      <span className="verified-badge" title="موثّق" style={{ marginRight: 8 }}>
-                        ✓
+                  <div className="data-item">
+                    <label>الاسم الكامل:</label>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editForm?.name ?? ''}
+                        onChange={(e) =>
+                          setEditForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+                        }
+                        className="input"
+                      />
+                    ) : (
+                      <span>
+                        {selectedUser.name}
+                        {selectedUser.phoneVerified && (
+                          <span className="verified-badge" title="موثّق" style={{ marginRight: 8 }}>
+                            ✓
+                          </span>
+                        )}
                       </span>
                     )}
-                  </span>
-                )}
-              </div>
+                  </div>
                   <div className="data-item">
                     <label>رقم الهاتف:</label>
                     {isEditing ? (
@@ -1178,7 +1263,22 @@ export default function UsersPage() {
                     )}
                   </div>
                   <div className="data-item">
-                    <label>كود المستخدم:</label>
+                    <label>العنوان:</label>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editForm?.address ?? ''}
+                        onChange={(e) =>
+                          setEditForm((prev) => (prev ? { ...prev, address: e.target.value } : prev))
+                        }
+                        className="input"
+                      />
+                    ) : (
+                      <span>{selectedUser.address || 'موقع غير محدد'}</span>
+                    )}
+                  </div>
+                  <div className="data-item">
+                    <label>كود المندوب:</label>
                     {isEditing ? (
                       <input
                         type="text"
@@ -1227,7 +1327,7 @@ export default function UsersPage() {
                         className="input"
                       />
                     ) : (
-                      <span>{selectedUser.registrationDate}</span>
+                      <span>{formatDateDDMMYYYY(selectedUser.registrationDate)}</span>
                     )}
                   </div>
                   {/* <div className="data-item">
@@ -1296,14 +1396,14 @@ export default function UsersPage() {
                     />
                   </div>
                 </div>
-                
+
                 <div className="ads-list">
                   {filteredAds.length > 0 ? (
                     filteredAds.map((ad) => (
                       <div key={ad.id} className="ad-item" onClick={() => openAdDetailsModal(ad)}>
                         <div className="ad-image">
-                          <Image 
-                            src={ad.image} 
+                          <Image
+                            src={ad.image}
                             alt={ad.title}
                             width={120}
                             height={90}
@@ -1617,8 +1717,8 @@ export default function UsersPage() {
                         onChange={(e) => handlePackagesChange('featuredAds', Number(e.target.value))}
                       />
                     </div>
-                    {/* <div className="field">
-                      <label>عدد الأيام للمتميزة</label>
+                    <div className="field">
+                      <label>عدد أيام صلاحية المتميزة</label>
                       <input
                         type="number"
                         className="form-input"
@@ -1626,28 +1726,6 @@ export default function UsersPage() {
                         value={packagesForm.featuredDays}
                         onChange={(e) => handlePackagesChange('featuredDays', Number(e.target.value))}
                       />
-                    </div> */}
-                    <div className="field expiry">
-                      <label>تاريخ انتهاء المتميزة</label>
-                      <div className="input-with-days">
-                        <input
-                          type="date"
-                          className="form-input has-days"
-                          value={packagesForm.featuredExpiryDate || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            handlePackagesChange('featuredExpiryDate', val);
-                            if (packagesForm.startFeaturedNow) {
-                              const dayMs = 24 * 60 * 60 * 1000;
-                              const now = new Date(); now.setHours(0,0,0,0);
-                              const exp = new Date(val); exp.setHours(0,0,0,0);
-                              const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
-                              handlePackagesChange('featuredDays', days);
-                            }
-                          }}
-                        />
-                        <div className="days-inside">متبقي: {getRemainingByDates(packagesForm.featuredStartDate, packagesForm.featuredExpiryDate)} يوم</div>
-                      </div>
                     </div>
                   </div>
                   <label className="toggle-label compact">
@@ -1690,8 +1768,8 @@ export default function UsersPage() {
                         onChange={(e) => handlePackagesChange('standardAds', Number(e.target.value))}
                       />
                     </div>
-                    {/* <div className="field">
-                      <label>عدد الأيام للستاندر</label>
+                    <div className="field">
+                      <label>عدد أيام صلاحية الستاندر</label>
                       <input
                         type="number"
                         className="form-input"
@@ -1699,28 +1777,6 @@ export default function UsersPage() {
                         value={packagesForm.standardDays}
                         onChange={(e) => handlePackagesChange('standardDays', Number(e.target.value))}
                       />
-                    </div> */}
-                    <div className="field expiry">
-                      <label>تاريخ انتهاء الستاندر</label>
-                      <div className="input-with-days">
-                        <input
-                          type="date"
-                          className="form-input has-days"
-                          value={packagesForm.standardExpiryDate || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            handlePackagesChange('standardExpiryDate', val);
-                            if (packagesForm.startStandardNow) {
-                              const dayMs = 24 * 60 * 60 * 1000;
-                              const now = new Date(); now.setHours(0,0,0,0);
-                              const exp = new Date(val); exp.setHours(0,0,0,0);
-                              const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / dayMs));
-                              handlePackagesChange('standardDays', days);
-                            }
-                          }}
-                        />
-                        <div className="days-inside">متبقي: {getRemainingByDates(packagesForm.standardStartDate, packagesForm.standardExpiryDate)} يوم</div>
-                      </div>
                     </div>
                   </div>
                   <label className="toggle-label compact">
@@ -1767,14 +1823,14 @@ export default function UsersPage() {
                 <div className="code-display" title="اضغط للنسخ" onClick={copyVerificationCode}>{verificationCode}</div>
                 <button className="copy-icon" onClick={copyVerificationCode} title="نسخ الكود">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="9" y="9" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2"/>
-                    <rect x="4" y="4" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2"/>
+                    <rect x="9" y="9" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2" />
+                    <rect x="4" y="4" width="11" height="11" rx="2" ry="2" stroke="white" strokeWidth="2" />
                   </svg>
                 </button>
                 <button className="whatsapp-icon" onClick={() => openWhatsAppWithCode(userForVerify)} title="إرسال عبر واتساب">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>
-                    <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none"/>
+                    <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white" />
+                    <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none" />
                   </svg>
                 </button>
               </div>
@@ -1782,7 +1838,7 @@ export default function UsersPage() {
             </div>
             <div className="modal-footer">
               {/* <button className="btn-cancel" onClick={closeVerifyModal}>إغلاق</button> */}
-          {/*    <button className="btn-verify-done" onClick={() => { if (userForVerify) handleVerifyPhone(userForVerify.id); closeVerifyModal(); }}>تم التحقق</button>*/}
+              {/*    <button className="btn-verify-done" onClick={() => { if (userForVerify) handleVerifyPhone(userForVerify.id); closeVerifyModal(); }}>تم التحقق</button>*/}
             </div>
           </div>
         </div>
@@ -1822,6 +1878,194 @@ export default function UsersPage() {
             <div className="modal-footer">
               <button className="btn-cancel" onClick={clearFavoritesForUser}>إلغاء التفضيل للجميع</button>
               <button className="btn-save" onClick={saveFavoritesForUser}>حفظ</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delegate Clients Modal */}
+      {isDelegateClientsModalOpen && selectedDelegateForClients && (
+        <div className="modal-overlay" onClick={() => setIsDelegateClientsModalOpen(false)}>
+          <div className="delegate-clients-modal" onClick={(e) => e.stopPropagation()} style={{
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            width: '95%',
+            maxWidth: '650px',
+            maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            overflow: 'hidden',
+            border: '1px solid #e5e7eb',
+            animation: 'modalFadeIn 0.3s ease-out'
+          }}>
+            <div className="modal-header" style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid #f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+              color: 'white'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '8px', borderRadius: '10px' }}>
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>عملاء المندوب</h3>
+                  <p style={{ margin: 0, fontSize: '13px', opacity: 0.9 }}>{selectedDelegateForClients.name}</p>
+                </div>
+              </div>
+              <button onClick={() => setIsDelegateClientsModalOpen(false)} style={{
+                background: 'rgba(255,255,255,0.1)',
+                border: 'none',
+                color: 'white',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}>✕</button>
+            </div>
+
+            <div className="modal-content" style={{ padding: '24px', overflowY: 'auto', flex: 1, backgroundColor: '#f9fafb' }}>
+              {isFetchingClients ? (
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6366f1' }}>
+                  <div style={{
+                    border: '4px solid #f3f4f6',
+                    borderTop: '4px solid #6366f1',
+                    borderRadius: '50%',
+                    width: '40px',
+                    height: '40px',
+                    margin: '0 auto 20px',
+                    animation: 'spin 1s linear infinite'
+                  }}></div>
+                  <p style={{ fontWeight: '600' }}>جاري جلب القائمة...</p>
+                </div>
+              ) : delegateClients.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {delegateClients.map((client) => (
+                    <div key={client.id} style={{
+                      padding: '16px',
+                      backgroundColor: 'white',
+                      borderRadius: '14px',
+                      border: '1px solid #e2e8f0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transition: 'transform 0.2s, box-shadow 0.2s',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                    }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0,0,0,0.05)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)';
+                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1 }}>
+                        <div style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '12px',
+                          backgroundColor: '#eef2ff',
+                          color: '#6366f1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 'bold',
+                          fontSize: '18px'
+                        }}>
+                          {client.name ? client.name.charAt(0).toUpperCase() : 'U'}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontWeight: '800', color: '#111827', fontSize: '15px' }}>{client.name || 'مستخدِم بدون اسم'}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                            <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Phone size={14} style={{ color: '#6366f1' }} />
+                              <span>{client.phone}</span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <MapPin size={14} style={{ color: '#6366f1' }} />
+                              <span>{client.address || 'موقع غير محدد'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleViewClientProfile(client)}
+                        title="عرض الملف الشخصي"
+                        style={{
+                          backgroundColor: '#6366f1',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '10px',
+                          padding: '10px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                          boxShadow: '0 4px 6px -1px rgba(99, 102, 241, 0.4)'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#4f46e5'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#6366f1'}
+                      >
+                        <ExternalLink size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
+                  <div style={{
+                    width: '80px',
+                    height: '80px',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 20px'
+                  }}>
+                    <Users size={40} />
+                  </div>
+                  <h4 style={{ color: '#374151', margin: '0 0 8px' }}>لا يوجد عملاء</h4>
+                  <p style={{ margin: 0, fontSize: '14px' }}>لم يقم أي مستخدمين بالتسجيل باستخدام كود هذا المندوب حتى الآن.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer" style={{
+              padding: '16px 24px',
+              borderTop: '1px solid #f3f4f6',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              backgroundColor: 'white'
+            }}>
+              <button
+                onClick={() => setIsDelegateClientsModalOpen(false)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  fontWeight: '700',
+                  fontSize: '14px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
+              >
+                إغلاق النافذة
+              </button>
             </div>
           </div>
         </div>
@@ -1996,13 +2240,13 @@ export default function UsersPage() {
                       >
                         {user.status === 'active' ? (
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2"/>
-                            <path d="m4.9 4.9 14.2 14.2" stroke="white" strokeWidth="2"/>
+                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2" />
+                            <path d="m4.9 4.9 14.2 14.2" stroke="white" strokeWidth="2" />
                           </svg>
                         ) : (
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2"/>
+                            <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2" />
                           </svg>
                         )}
                       </button>
@@ -2026,14 +2270,14 @@ export default function UsersPage() {
                         🔑
                       </button> */}
                       <button
-                        className="btn-set-pin"
-                        onClick={() => handleSetPIN(user.id)}
+                        className="btn-change-password"
+                        onClick={() => handleChangePassword(user.id)}
                         title="تغيير كلمة السر"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke="white" strokeWidth="2"/>
-                          <circle cx="12" cy="16" r="1" fill="white"/>
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="white" strokeWidth="2"/>
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke="white" strokeWidth="2" />
+                          <circle cx="12" cy="16" r="1" fill="white" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="white" strokeWidth="2" />
                         </svg>
                       </button>
                       <button
@@ -2042,8 +2286,8 @@ export default function UsersPage() {
                         title="عرض كود التحقق"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2"/>
-                          <path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="2" />
+                          <path d="M8 12l2.5 2.5L16 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       </button>
                       <button
@@ -2052,9 +2296,9 @@ export default function UsersPage() {
                         title="الباقات"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 7l9-4 9 4-9 4-9-4z" stroke="white" strokeWidth="2"/>
-                          <path d="M3 12l9 4 9-4" stroke="white" strokeWidth="2"/>
-                          <path d="M3 12v5l9 4 9-4v-5" stroke="white" strokeWidth="2"/>
+                          <path d="M3 7l9-4 9 4-9 4-9-4z" stroke="white" strokeWidth="2" />
+                          <path d="M3 12l9 4 9-4" stroke="white" strokeWidth="2" />
+                          <path d="M3 12v5l9 4 9-4v-5" stroke="white" strokeWidth="2" />
                         </svg>
                       </button>
                       {(String(user.role || '').toLowerCase().includes('advertiser') || String(user.role || '').includes('معلن')) && (
@@ -2064,8 +2308,29 @@ export default function UsersPage() {
                           title="المفضلة"
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="white"/>
+                            <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="white" />
                           </svg>
+                        </button>
+                      )}
+                      {(user.role === 'representative' || user.role === 'مندوب') && (
+                        <button
+                          className="btn-delegate-clients"
+                          onClick={() => handleOpenDelegateClients(user)}
+                          title="عملاء المندوب"
+                          style={{
+                            backgroundColor: '#6366f1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '4px 8px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: '4px'
+                          }}
+                        >
+                          <Users size={16} />
                         </button>
                       )}
                       <button
@@ -2074,9 +2339,9 @@ export default function UsersPage() {
                         title="حذف المستخدم"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 6h18" stroke="white" strokeWidth="2"/>
-                          <path d="M8 6V4h8v2" stroke="white" strokeWidth="2"/>
-                          <path d="M6 6l1 14h10l1-14" stroke="white" strokeWidth="2"/>
+                          <path d="M3 6h18" stroke="white" strokeWidth="2" />
+                          <path d="M8 6V4h8v2" stroke="white" strokeWidth="2" />
+                          <path d="M6 6l1 14h10l1-14" stroke="white" strokeWidth="2" />
                         </svg>
                       </button>
                     </div>
@@ -2123,7 +2388,7 @@ export default function UsersPage() {
                   {user.status === 'active' ? 'نشط' : 'محظور'}
                 </span>
               </div>
-              
+
               <div className="card-body">
                 <div className="info-grid">
                   <div className="info-item">
@@ -2136,8 +2401,8 @@ export default function UsersPage() {
                         title="فتح واتساب"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white"/>
-                          <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none"/>
+                          <path d="M16.8 15.2c-.4.2-1 .4-1.5.2-.3-.1-.7-.2-1.1-.5-.6-.3-1.2-.8-1.7-1.4-.5-.5-.9-1.1-1.1-1.6-.2-.4-.3-.8-.2-1.1.1-.6.7-.9 1.1-1.1l.3-.2c.1-.1.2-.1.3 0 .1.1.7.9.8 1 .1.1.1.2 0 .3l-.3.4c-.1.1-.1.2 0 .4.2.3.5.7.8 1 .3.3.7.6 1 .8.1.1.3.1.4 0l.4-.3c.1-.1.2-.1.3 0 .1.1.9.7 1 .8.1.1.1.2 0 .3l-.1.2c-.2.4-.6.9-1.2 1.1z" fill="white" />
+                          <path d="M20 12a8 8 0 1 0-14.6 4.8L4 21l4.3-1.3A8 8 0 0 0 20 12z" stroke="white" strokeWidth="2" fill="none" />
                         </svg>
                       </button>
                     </span>
@@ -2156,7 +2421,7 @@ export default function UsersPage() {
                   </div>
                 </div>
               </div>
-              
+
               <div className="card-actions">
                 <button
                   className="btn-view"
@@ -2172,6 +2437,30 @@ export default function UsersPage() {
                 >
                   {user.status === 'active' ? 'حظر' : 'إلغاء الحظر'}
                 </button>
+                {(user.role === 'representative' || user.role === 'مندوب') && (
+                  <button
+                    className="btn-delegate-clients"
+                    onClick={() => handleOpenDelegateClients(user)}
+                    title="عملاء المندوب"
+                    style={{
+                      backgroundColor: '#6366f1',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      boxShadow: '0 4px 6px -1px rgba(99, 102, 241, 0.2)'
+                    }}
+                  >
+                    <Users size={16} />
+                    عملاء المندوب
+                  </button>
+                )}
                 {/* <button
                   className="btn-reset-password"
                   onClick={() => handleResetPassword(user.id)}
@@ -2234,30 +2523,29 @@ export default function UsersPage() {
             <div className="pagination-info">
               عرض {serverTotal} مستخدم في {totalPages} صفحة
             </div>
-            
+
             <div className="pagination">
-              <button 
+              <button
                 className="pagination-btn pagination-nav"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
               >
                 السابق
               </button>
-              
+
               {getPageNumbers().map((page, index) => (
                 <button
                   key={index}
-                  className={`pagination-btn ${
-                    page === currentPage ? 'active' : ''
-                  } ${page === '...' ? 'pagination-dots' : ''}`}
+                  className={`pagination-btn ${page === currentPage ? 'active' : ''
+                    } ${page === '...' ? 'pagination-dots' : ''}`}
                   onClick={() => typeof page === 'number' && goToPage(page)}
                   disabled={page === '...'}
                 >
                   {page}
                 </button>
               ))}
-              
-              <button 
+
+              <button
                 className="pagination-btn pagination-nav"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages}

@@ -1,4 +1,4 @@
-import { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse, SetFeaturedPayload, SetFeaturedResponse, DisableFeaturedResponse } from '@/models/users';
+import { UsersSummaryResponse, UpdateUserPayload, UpdateUserResponse, BlockUserResponse, DeleteUserResponse, CreateUserPayload, CreateUserResponse, ChangePasswordResponse, CreateOtpResponse, SingleUserListingsResponse, CategoriesResponse, AssignUserPackagePayload, AssignUserPackageResponse, SetFeaturedPayload, SetFeaturedResponse, DisableFeaturedResponse, DelegateClientsResponse } from '@/models/users';
 
 export async function fetchUsersSummary(token?: string): Promise<UsersSummaryResponse> {
   const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
@@ -259,6 +259,23 @@ export async function assignUserPackage(payload: AssignUserPackagePayload, token
   if (!res.ok || !data) {
     const err = raw as { error?: string; message?: string } | null;
     const message = (err?.error || err?.message || 'تعذر حفظ الباقة للمستخدم');
+    throw new Error(message);
+  }
+  return data;
+}
+export async function fetchDelegateClients(userId: number | string, token?: string): Promise<DelegateClientsResponse> {
+  const t = token ?? (typeof window !== 'undefined' ? localStorage.getItem('authToken') ?? undefined : undefined);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (t) headers.Authorization = `Bearer ${t}`;
+  const res = await fetch(`https://api.nasmasr.app/api/admin/delegates/${userId}/clients`, {
+    method: 'GET',
+    headers,
+  });
+  const raw = (await res.json().catch(() => null)) as unknown;
+  const data = raw as DelegateClientsResponse | null;
+  if (!res.ok || !data) {
+    const err = raw as { error?: string; message?: string } | null;
+    const message = (err?.error || err?.message || 'تعذر جلب عملاء المندوب');
     throw new Error(message);
   }
   return data;

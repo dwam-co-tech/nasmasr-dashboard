@@ -9,11 +9,13 @@ export interface UserSummary {
   id: number;
   name: string | null;
   phone: string;
+  address: string | null;
   user_code: string;
   status: string;
   registered_at: string;
   listings_count: number;
   role: string;
+  phone_verified: boolean;
 }
 
 export interface UsersSummaryResponse {
@@ -164,4 +166,25 @@ export interface SetFeaturedResponse {
 export interface DisableFeaturedResponse {
   success?: boolean;
   message?: string;
+}
+
+export interface DelegateClient {
+  id: number;
+  name: string | null;
+  phone: string;
+  address: string | null;
+  lat: string | null;
+  lng: string | null;
+  status: string;
+  role: string;
+  user_code: string;
+  registered_at: string;
+  listings_count: number;
+  phone_verified: boolean;
+}
+
+export interface DelegateClientsResponse {
+  success: boolean;
+  message: string;
+  data: DelegateClient[];
 }
