@@ -24,7 +24,9 @@ interface RootLayoutProps {
 export default function RootLayout({ children }: RootLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
-  const isLanding = pathname === "/";
+  const isHomeIntro = pathname === "/";
+  const isNewLanding = pathname?.startsWith("/landing");
+  const isLegalPage = pathname?.startsWith("/terms") || pathname?.startsWith("/privacy");
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -44,8 +46,10 @@ export default function RootLayout({ children }: RootLayoutProps) {
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
-        {isLanding ? (
+        {isHomeIntro ? (
           <main className="content">{children}</main>
+        ) : isNewLanding || isLegalPage ? (
+          <main>{children}</main>
         ) : (
           <div className="dashboard-layout">
             <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
