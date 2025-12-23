@@ -155,14 +155,14 @@ export default function LandingPage() {
                   <Image src="/google.png" alt="Google Play" width={28} height={28} className="store-logo" />
                   <span className="store-text">
                     <strong>Google Play</strong>
-                    <em>حمّل التطبيق</em>
+                    <em>قريباً <span className="loading-dots"><span className="dot"></span><span className="dot"></span><span className="dot"></span></span></em>
                   </span>
                 </a>
                 <a href="#" className="store-badge appstore" aria-label="App Store">
                   <Image src="/app-store.png" alt="App Store" width={28} height={28} className="store-logo" />
                   <span className="store-text">
                     <strong>App Store</strong>
-                    <em>حمّل التطبيق</em>
+                    <em>قريباً <span className="loading-dots"><span className="dot"></span><span className="dot"></span><span className="dot"></span></span></em>
                   </span>
                 </a>
               </div>
@@ -339,14 +339,14 @@ export default function LandingPage() {
                 <Image src="/google.png" alt="Google Play" width={28} height={28} className="store-logo" />
                 <span className="store-text">
                   <strong>Google Play</strong>
-                  <em>حمّل التطبيق</em>
+                  <em>قريباً <span className="loading-dots"><span className="dot"></span><span className="dot"></span><span className="dot"></span></span></em>
                 </span>
               </a>
               <a href="#" className="store-badge appstore" aria-label="App Store">
                 <Image src="/app-store.png" alt="App Store" width={28} height={28} className="store-logo" />
                 <span className="store-text">
                   <strong>App Store</strong>
-                  <em>حمّل التطبيق</em>
+                  <em>قريباً <span className="loading-dots"><span className="dot"></span><span className="dot"></span><span className="dot"></span></span></em>
                 </span>
               </a>
             </div>
