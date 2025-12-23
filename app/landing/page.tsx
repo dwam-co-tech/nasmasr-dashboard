@@ -3,6 +3,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState, useRef } from "react";
 import "./landing.css";
+import { FiSmartphone, FiMessageSquare, FiSearch, FiLock, FiZap, FiShield, FiBell, FiMapPin, FiChevronDown } from "react-icons/fi";
+import { FaAndroid, FaGem, FaStar, FaHeart, FaRocket, FaMagic } from "react-icons/fa";
 
 const LANDING_CATEGORIES = [
   { id: 1, name: 'إيجار السيارات'},
@@ -62,6 +64,7 @@ export default function LandingPage() {
   const [catsInView, setCatsInView] = useState(false);
   const whyGridRef = useRef<HTMLDivElement | null>(null);
   const [whyInView, setWhyInView] = useState(false);
+  const [selectedCatIdx, setSelectedCatIdx] = useState<number>(0);
 
   useEffect(() => {
     if (phase !== 'in') return;
@@ -137,10 +140,10 @@ export default function LandingPage() {
 
       <section className="landing-hero" id="home">
         <div className="hero-floating-icons">
-          <span className="hi hi-mobile">📱</span>
-          <span className="hi hi-android">📱</span>
-          <span className="hi hi-chat">💬</span>
-          <span className="hi hi-search">🔍</span>
+          <span className="hi hi-mobile"><FiSmartphone /></span>
+          <span className="hi hi-android"><FaAndroid /></span>
+          <span className="hi hi-chat"><FiMessageSquare /></span>
+          <span className="hi hi-search"><FiSearch /></span>
         </div>
         <div className="hero-content">
           <div className="brand">
@@ -181,20 +184,20 @@ export default function LandingPage() {
         </div>
 
         <div className="hero-visual">
-          <div className="device-mockup">
-            <div className="device-frame">
-              <div className="device-notch"></div>
-              <div className="device-screen">
-                <Image src="/home.png" alt="لقطة تطبيق ناس مصر" width={360} height={1200} className="screen-image" />
+            <div className="device-mockup">
+              <div className="device-frame">
+                <div className="device-notch"></div>
+                <div className="device-screen">
+                  <Image src="/home.png" alt="لقطة تطبيق ناس مصر" width={360} height={1200} className="screen-image" />
+                </div>
               </div>
-            </div>
-            <div className="scroll-indicator">
-              <span className="scroll-arrow">⬇</span>
+              <div className="scroll-indicator">
+              <span className="scroll-arrow"><FiChevronDown /></span>
               <span className="scroll-text">يمكنك السحب داخل شاشة الهاتف</span>
             </div>
-            <div className="device-glow"></div>
+              <div className="device-glow"></div>
+            </div>
           </div>
-        </div>
       </section>
 
       <section className="features-section" id="features">
@@ -204,32 +207,32 @@ export default function LandingPage() {
         </div>
         <div className="features-grid">
           <div className="feature-card">
-            <div className="feature-icon">�</div>
+            <div className="feature-icon"><FiSearch /></div>
             <h3 className="feature-title">بحث ذكي</h3>
             <p className="feature-desc">اعثر على ما تريده بسرعة مع اقتراحات فورية.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">💬</div>
+            <div className="feature-icon"><FiMessageSquare /></div>
             <h3 className="feature-title">دردشة فورية</h3>
             <p className="feature-desc">تواصل مباشرة مع البائعين عبر رسائل سريعة.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">🔔</div>
+            <div className="feature-icon"><FiBell /></div>
             <h3 className="feature-title">إشعارات لحظية</h3>
             <p className="feature-desc">تابع الردود والعروض والتنبيهات فور حدوثها.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">🔒</div>
+            <div className="feature-icon"><FiLock /></div>
             <h3 className="feature-title">خصوصية</h3>
             <p className="feature-desc">حماية بياناتك وتحكم كامل في إعدادات الخصوصية.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">⚡</div>
+            <div className="feature-icon"><FiZap /></div>
             <h3 className="feature-title">أداء سريع</h3>
             <p className="feature-desc">تحميل خفيف وحركات سلسة على الأجهزة المختلفة.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">📍</div>
+            <div className="feature-icon"><FiMapPin /></div>
             <h3 className="feature-title">تحديد موقع تلقائي</h3>
             <p className="feature-desc">إعلانات وخدمات بحسب موقعك الحالي.</p>
           </div>
@@ -263,29 +266,32 @@ export default function LandingPage() {
           <h2 className="section-title">الأقسام</h2>
           <p className="section-subtitle">مجالات متعددة تغطي احتياجاتك</p>
         </div>
-        <div className="categories-grid" ref={catsGridRef}>
+        <div className="categories-grid" ref={catsGridRef} role="tablist" aria-label="الأقسام">
           {LANDING_CATEGORIES.map((cat, idx) => (
-            <Link
-              href="/categories"
+            <button
+              type="button"
               key={cat.id}
-              className={`category-card${catsInView ? ' in' : ''}`}
+              className={`category-card${catsInView ? ' in' : ''}${selectedCatIdx === idx ? ' active' : ''}`}
               style={{ animationDelay: `${idx * 100}ms` }}
+              role="tab"
+              aria-selected={selectedCatIdx === idx}
+              onClick={() => { setSelectedCatIdx(idx); setCurrentIndex(idx); setPhase('in'); }}
             >
               <span className="category-name">{cat.name}</span>
               <span className="card-shine" />
-            </Link>
+            </button>
           ))}
         </div>
       </section>
 
       <section className="why-section" id="why">
         <div className="why-floating-icons">
-          <span className="fi fi-search">🔍</span>
-          <span className="fi fi-chat">💬</span>
-          <span className="fi fi-lock">🔒</span>
-          <span className="fi fi-speed">⚡</span>
-          <span className="fi fi-shield">🛡️</span>
-          <span className="fi fi-diamond">💎</span>
+          <span className="fi fi-search"><FiSearch /></span>
+          <span className="fi fi-chat"><FiMessageSquare /></span>
+          <span className="fi fi-lock"><FiLock /></span>
+          <span className="fi fi-speed"><FiZap /></span>
+          <span className="fi fi-shield"><FiShield /></span>
+          <span className="fi fi-diamond"><FaGem /></span>
         </div>
         <div className="section-header">
           <h2 className="section-title">لماذا هذا التطبيق ؟</h2>
@@ -325,10 +331,10 @@ export default function LandingPage() {
 
       <section className="promo-section" id="download">
         <div className="promo-icons">
-          <span className="pi pi-star">⭐</span>
-          <span className="pi pi-heart">❤️</span>
-          <span className="pi pi-rocket">🚀</span>
-          <span className="pi pi-sparkles">✨</span>
+          <span className="pi pi-star"><FaStar /></span>
+          <span className="pi pi-heart"><FaHeart /></span>
+          <span className="pi pi-rocket"><FaRocket /></span>
+          <span className="pi pi-sparkles"><FaMagic /></span>
         </div>
         <div className="promo-inner">
           <div className="promo-content">

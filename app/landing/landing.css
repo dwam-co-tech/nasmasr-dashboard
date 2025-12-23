@@ -716,6 +716,7 @@
   opacity: 0;
   overflow: hidden;
   transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  cursor: pointer;
 }
 .category-card.in { animation: fadeUp .6s ease-out forwards; }
 .category-card::before {
@@ -738,6 +739,19 @@
 .category-card:hover::before {
   opacity: 0.16;
   transform: rotate(-6deg);
+}
+.category-card.active,
+.category-card[aria-selected="true"] {
+  transform: translateY(0) scale(1.01);
+  box-shadow: 0 16px 32px rgba(17,24,39,0.16);
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(135deg, var(--c1), var(--c2)) border-box;
+  border: 1px solid transparent;
+}
+.category-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(27,178,143,0.2);
 }
 .category-card .category-name { font-size: 13px; font-weight: 800; color: #111827;text-align: center; }
 .category-card .card-shine {
@@ -1012,12 +1026,25 @@
   .hero-title { font-size: 26px; }
   .hero-subtitle { font-size: 16px; }
   .features-grid { grid-template-columns: 1fr; }
-  .stats-grid { grid-template-columns: 1fr 1fr; }
+  .stats-grid { width: 100%; grid-template-columns: 1fr 1fr !important; gap: 12px; }
   .hero-actions { flex-direction: column; }
   .cta-actions { flex-direction: column; }
   .hero-categories { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .categories-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .categories-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .why-grid { grid-template-columns: 1fr; }
   .promo-inner { grid-template-columns: 1fr; }
   .promo-section .device-frame { width: 280px; height: 560px; }
+  .download-actions { flex-direction: row; gap: 8px; }
+  .store-badge { width: auto; justify-content: center; }
+  .hero-content { margin-right: 0; }
+  .hero-category-rotator { width: 70%; padding: 10px 12px; }
+  .hero-floating-icons { display: none; }
+  .section-title { font-size: 18px; }
+  .section-subtitle { font-size: 12px; }
+  .stat-card { padding: 16px 18px; min-height: 84px; }
+  .stat-value { font-size: 22px; }
+}
+
+@media (max-width: 768px) {
+  .hero-floating-icons { display: none !important; }
 }
